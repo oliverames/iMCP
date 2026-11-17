@@ -59,9 +59,14 @@ actor MobileService: MobileBackend {
         self.isEnabled = isEnabled
     }
 
-    /// Whether Health or Alarms is on in iMCP.
-    nonisolated static func isAnyServiceEnabled() -> Bool {
-        ["alarmsEnabled", "healthEnabled"].contains { UserDefaults.standard.bool(forKey: $0) }
+    /// Whether Health or Alarms is on in iMCP,
+    /// or "Approve on iPhone" is on with a paired device.
+    nonisolated static func isAnyServiceEnabled(
+        defaults: UserDefaults = .standard,
+        hasPairedDevice: @autoclosure () -> Bool = MobileService.shared.hasPairedDevice
+    ) -> Bool {
+        ["alarmsEnabled", "healthEnabled"].contains { defaults.bool(forKey: $0) }
+            || (RemoteApprovals.isEnabled(in: defaults) && hasPairedDevice())
     }
 
     /// Whether `service` is one of the services that this actor serves.
@@ -80,8 +85,8 @@ actor MobileService: MobileBackend {
     /// The port that the listener uses, or nil when iMCP isn't listening.
     var listeningPort: UInt16? { listener == nil ? nil : port.rawValue }
 
-    /// Starts or stops listening after Health or Alarms is turned on or off.
-    /// When both are off, also closes the connection to the phone.
+    /// Starts or stops listening after Health, Alarms, or "Approve on iPhone" changes.
+    /// When none is active, also closes the connection to the phone.
     func servicesChanged() async {
         if !isEnabled() { await disconnect() }
         do {

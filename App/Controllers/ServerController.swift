@@ -1004,8 +1004,9 @@ final class ServerController: ObservableObject {
             await self.networkManager.start()
             self.updateServerStatus("Running")
 
-            // Listen for a paired iPhone or iPad so it can sync before the first tool call.
-            if self.alarmsEnabled || self.healthEnabled {
+            // Listen for a paired iPhone or iPad so it can sync before the first tool call
+            // or receive approval requests even when Health and Alarms are off.
+            if self.alarmsEnabled || self.healthEnabled || MobileService.shared.hasPairedDevice {
                 try? await MobileService.shared.start()
             }
             await self.networkManager.remoteAccess.setHandlers(

@@ -10,11 +10,15 @@ final class RemoteApprovals {
     static let shared = RemoteApprovals()
 
     /// The "Approve on iPhone" setting. It's on unless the person turns it off.
-    static let defaultsKey = "approveOnIPhone"
+    nonisolated static let defaultsKey = "approveOnIPhone"
     private static let interval: Duration = .seconds(1)
 
-    static var isEnabled: Bool {
-        UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
+    nonisolated static var isEnabled: Bool {
+        isEnabled(in: .standard)
+    }
+
+    nonisolated static func isEnabled(in defaults: UserDefaults) -> Bool {
+        defaults.object(forKey: defaultsKey) as? Bool ?? true
     }
 
     private let broker: ApprovalBroker

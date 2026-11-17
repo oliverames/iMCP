@@ -158,4 +158,21 @@ final class RemoteApprovalTests: XCTestCase {
         )
         XCTAssertEqual(resolved, [])
     }
+
+    func testMobileListenerEnablesForPairedDeviceWhenApprovalsAreEnabled() throws {
+        let suite = "RemoteApprovalTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        // Health and Alarms are off, approveOnIPhone is unset (defaults to true).
+        XCTAssertFalse(MobileService.isAnyServiceEnabled(defaults: defaults, hasPairedDevice: false))
+        XCTAssertTrue(MobileService.isAnyServiceEnabled(defaults: defaults, hasPairedDevice: true))
+
+        // Turning off Approve on iPhone disables the listener unless Health or Alarms is on.
+        defaults.set(false, forKey: RemoteApprovals.defaultsKey)
+        XCTAssertFalse(MobileService.isAnyServiceEnabled(defaults: defaults, hasPairedDevice: true))
+
+        defaults.set(true, forKey: "healthEnabled")
+        XCTAssertTrue(MobileService.isAnyServiceEnabled(defaults: defaults, hasPairedDevice: false))
+    }
 }

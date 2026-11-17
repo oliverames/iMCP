@@ -58,6 +58,9 @@ struct MobileSettingsView: View {
                     )
                 )
                 .disabled(devices.isEmpty)
+                .onChange(of: approveOnIPhone) {
+                    Task { await MobileService.shared.servicesChanged() }
+                }
             } footer: {
                 Text(
                     "Connection requests, public access requests, and message, email, and call confirmations also show on your paired iPhone, and the first answer from either device wins. A request that nobody answers is denied."
