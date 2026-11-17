@@ -37,8 +37,10 @@ struct App: SwiftUI.App {
         } label: {
             HStack(spacing: 3) {
                 Image(#"MenuIcon-\#(isEnabled ? "On" : "Off")"#)
+                #if DEBUG
                 Text("DEV")
                     .font(.system(size: 9, weight: .heavy, design: .rounded))
+                #endif
             }
         }
         .menuBarExtraStyle(.window)
