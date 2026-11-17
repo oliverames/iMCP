@@ -149,6 +149,38 @@ enum DevBootstrap {
             if defaults.object(forKey: "cloudflareTunnelEnabled") == nil, cloudflareHostname != nil {
                 defaults.set(true, forKey: "cloudflareTunnelEnabled")
             }
+            if defaults.object(forKey: "remoteAccessEnabled") == nil {
+                defaults.set(true, forKey: "remoteAccessEnabled")
+            }
+            if defaults.object(forKey: "remoteAccessFunnelEnabled") == nil {
+                defaults.set(true, forKey: "remoteAccessFunnelEnabled")
+            }
+            for serviceKey in [
+                "alarmsEnabled",
+                "calendarEnabled",
+                "captureEnabled",
+                "contactsEnabled",
+                "filesEnabled",
+                "healthEnabled",
+                "locationEnabled",
+                "mailEnabled",
+                "mapsEnabled",
+                "messagesEnabled",
+                "musicEnabled",
+                "notesEnabled",
+                "phoneEnabled",
+                "remindersEnabled",
+                "shortcutsEnabled",
+                "utilitiesEnabled",
+                "voiceMemosEnabled",
+                "voicemailEnabled",
+                "weatherEnabled",
+                "writesEnabled.FilesService",
+                "writesEnabled.MessageService",
+                "writesEnabled.NotesService",
+            ] where defaults.object(forKey: serviceKey) == nil {
+                defaults.set(true, forKey: serviceKey)
+            }
             if let cfMobile = cloudflareMobileURL,
                 (defaults.string(forKey: "mobileCloudflareURL") ?? "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -156,7 +188,54 @@ enum DevBootstrap {
             {
                 defaults.set(cfMobile, forKey: "mobileCloudflareURL")
             }
+            if let funnelMobile = funnelMobileURL,
+                (defaults.string(forKey: "mobileFunnelURL") ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            {
+                defaults.set(funnelMobile, forKey: "mobileFunnelURL")
+            }
+            if let tsHost = tailnetHost,
+                (defaults.string(forKey: "mobileTailnetHost") ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty
+            {
+                defaults.set(tsHost, forKey: "mobileTailnetHost")
+            }
             defaults.set(true, forKey: macCloudflareSeededKey)
+        }
+
+        if defaults.object(forKey: "remoteAccessEnabled") == nil {
+            defaults.set(true, forKey: "remoteAccessEnabled")
+            defaults.set(true, forKey: "remoteAccessFunnelEnabled")
+        }
+        if defaults.object(forKey: "notesEnabled") == nil {
+            for serviceKey in [
+                "alarmsEnabled",
+                "calendarEnabled",
+                "captureEnabled",
+                "contactsEnabled",
+                "filesEnabled",
+                "healthEnabled",
+                "locationEnabled",
+                "mailEnabled",
+                "mapsEnabled",
+                "messagesEnabled",
+                "musicEnabled",
+                "notesEnabled",
+                "phoneEnabled",
+                "remindersEnabled",
+                "shortcutsEnabled",
+                "utilitiesEnabled",
+                "voiceMemosEnabled",
+                "voicemailEnabled",
+                "weatherEnabled",
+                "writesEnabled.FilesService",
+                "writesEnabled.MessageService",
+                "writesEnabled.NotesService",
+            ] where defaults.object(forKey: serviceKey) == nil {
+                defaults.set(true, forKey: serviceKey)
+            }
         }
 
         if !defaults.bool(forKey: macApprovalModeSeededKey) {
