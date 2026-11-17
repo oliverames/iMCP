@@ -46,15 +46,9 @@ protocol TailnetListener: Sendable {
 }
 
 /// A TCP connection that a peer opened to the node.
-protocol TailnetConnection: Sendable {
+protocol TailnetConnection: MobileByteStream {
     /// The peer's tailnet IP address, without a port.
     var remoteAddress: String? { get }
-    /// The next bytes from the peer, or empty data when the peer closes the connection.
-    /// Throws when no bytes arrive before the timeout.
-    func receive(timeout: Duration) async throws -> Data
-    /// Sends all the bytes, or throws.
-    func send(_ data: Data, timeout: Duration) async throws
-    func close() async
 }
 
 /// The node itself, once it's on the tailnet.
@@ -237,6 +231,8 @@ actor RemoteAccessServer {
         var funnel: Funnel = .off
         /// Whether the tailnet policy reports the `funnel` capability for this node.
         var funnelCapabilityGranted: Bool? = nil
+        /// The public WebSocket URL for iMCP for iOS when Funnel is active.
+        var mobileWebSocketURL: String? = nil
     }
 
     /// Whether the server is open to the internet.
@@ -263,6 +259,8 @@ actor RemoteAccessServer {
         var funnelEnabled = false
         /// The public hostname served through Cloudflare Tunnel, when Cloudflare Tunnel is enabled.
         var cloudflareHostname: String? = nil
+        /// Optional TCP port on the tailnet address for direct iPhone/iPad connections.
+        var mobilePort: UInt16? = nil
     }
 
     static let defaultPort: UInt16 = 4627
@@ -299,6 +297,10 @@ actor RemoteAccessServer {
     private var stateHandler: (@Sendable (State) -> Void)?
     private var tokenUsageHandler: (@Sendable () -> Void)?
     private var publicLoopbackHandler: (@Sendable (PublicLoopbackState) -> Void)?
+    private var mobileTCPHandler: (@Sendable (any TailnetConnection) async -> Void)?
+    private var mobileWebSocketHandler: (@Sendable (any MobileFrameWire, MobileTransportMode) async -> Void)?
+    private var isMobileListening = false
+    private var mobileConnections: [UUID: Task<Void, Never>] = [:]
     private var state: State = .off {
         didSet {
             guard state != oldValue else { return }
@@ -385,6 +387,15 @@ actor RemoteAccessServer {
         oauthEndpoints.setApprovalHandler(handler)
     }
 
+    /// Sets the handlers for iPhone/iPad connections over Tailscale VPN and public WebSockets.
+    func setMobileHandlers(
+        tcp: (@Sendable (any TailnetConnection) async -> Void)?,
+        webSocket: (@Sendable (any MobileFrameWire, MobileTransportMode) async -> Void)?
+    ) {
+        mobileTCPHandler = tcp
+        mobileWebSocketHandler = webSocket
+    }
+
     /// Starts the node when remote access is on, and stops it when it's off.
     /// A change to the port or host name restarts the node; a Cloudflare hostname change updates only the public pipeline.
     func configure(_ configuration: Configuration) async {
@@ -397,6 +408,7 @@ actor RemoteAccessServer {
             || configuration.port != previous.port
             || configuration.hostname != previous.hostname
             || configuration.funnelEnabled != previous.funnelEnabled
+            || configuration.mobilePort != previous.mobilePort
 
         let normalizedCloudflare = configuration.cloudflareHostname
             .map(FunnelPolicy.normalizedHost)
@@ -481,10 +493,12 @@ actor RemoteAccessServer {
         self.node = nil
         identity = nil
         isListening = false
+        isMobileListening = false
         peers.removeAll()
         // A cancelled connection ends its stream and handles no more requests.
         // Each task closes its own connection, because closing it during a read isn't safe.
         for task in connections.values { task.cancel() }
+        for task in mobileConnections.values { task.cancel() }
         // A request in flight can still save its configuration, so let it finish before clearing.
         if let pending = funnelEnableTask {
             _ = try? await pending.value
@@ -604,6 +618,18 @@ actor RemoteAccessServer {
             }
         }
 
+        if !isMobileListening, let mobilePort = configuration.mobilePort, mobilePort > 0, mobileTCPHandler != nil {
+            do {
+                let mobileListener = try await node.listen(on: me.ipv4Address, port: mobilePort)
+                guard current == generation else { return }
+                isMobileListening = true
+                acceptMobileConnections(from: mobileListener, node: node, generation: current)
+                log.notice("Mobile tailnet listener active on \(me.ipv4Address, privacy: .public):\(mobilePort)")
+            } catch {
+                log.error("Mobile tailnet listener failed: \(error)")
+            }
+        }
+
         if !funnelConfigured {
             funnelConfigured = true
             if configuration.funnelEnabled {
@@ -620,7 +646,8 @@ actor RemoteAccessServer {
                 ipv4Address: me.ipv4Address,
                 ipv6Address: me.ipv6Address,
                 funnel: funnelState,
-                funnelCapabilityGranted: status.funnelCapabilityGranted
+                funnelCapabilityGranted: status.funnelCapabilityGranted,
+                mobileWebSocketURL: tailscaleFunnelHost.map(FunnelPolicy.mobileWebSocketURL(host:))
             )
         )
     }
@@ -755,14 +782,135 @@ actor RemoteAccessServer {
                     Self.logPublicRequest(request, statusCode: response.statusCode)
                     return (response, keepAlive: !FunnelPolicy.closesConnection(afterStatus: response.statusCode))
                 },
+                onUpgrade: { message, rawConnection, leftover in
+                    await self.handleFunnelMobileUpgrade(
+                        message: message,
+                        connection: rawConnection,
+                        leftover: leftover
+                    )
+                },
                 streamEnded: { sessionID in await self.streamEnded(sessionID: sessionID) }
             )
             self.funnelConnectionClosed(id)
         }
     }
 
+    private func handleFunnelMobileUpgrade(
+        message: HTTPRequestMessage,
+        connection: any TailnetConnection,
+        leftover: Data
+    ) async -> Bool {
+        guard message.path == MobileLink.mobileWebSocketPath,
+            MobileWebSocketHandshake.isUpgradeRequest(method: message.method, headers: message.headers)
+        else {
+            return false
+        }
+        let hosts = publicHosts
+        guard !hosts.isEmpty else {
+            let reply = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            try? await connection.send(Data(reply.utf8), timeout: .seconds(5))
+            await connection.close()
+            return true
+        }
+        let validator = FunnelPolicy.originValidator(hosts: hosts)
+        let request = MCP.HTTPRequest(
+            method: message.method,
+            headers: message.headers,
+            body: nil,
+            path: message.path
+        )
+        let context = HTTPValidationContext(
+            httpMethod: message.method,
+            sessionID: nil,
+            isInitializationRequest: false,
+            supportedProtocolVersions: MCP.Version.supported
+        )
+        if validator.validate(request, context: context) != nil {
+            let reply = "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            try? await connection.send(Data(reply.utf8), timeout: .seconds(5))
+            await connection.close()
+            return true
+        }
+        guard let handler = mobileWebSocketHandler,
+            let clientKey = MobileWebSocketHandshake.header("Sec-WebSocket-Key", in: message.headers)
+        else {
+            let reply = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            try? await connection.send(Data(reply.utf8), timeout: .seconds(5))
+            await connection.close()
+            return true
+        }
+        do {
+            try await connection.send(
+                MobileWebSocketHandshake.responseData(clientKey: clientKey),
+                timeout: .seconds(5)
+            )
+        } catch {
+            await connection.close()
+            return true
+        }
+        let normalizedHost = message.header("Host").map(FunnelPolicy.normalizedHost)
+        let transportMode: MobileTransportMode =
+            (normalizedHost != nil && normalizedHost == cloudflareHost) ? .cloudflareTunnel : .tailscaleFunnel
+        let wire = MobileServerWebSocketWire(stream: connection, initialBuffer: leftover)
+        await handler(wire, transportMode)
+        return true
+    }
+
     private func funnelConnectionClosed(_ id: UUID) {
         funnelConnections.removeValue(forKey: id)
+    }
+
+    private func acceptMobileConnections(
+        from listener: any TailnetListener,
+        node: any TailnetNode,
+        generation current: Int
+    ) {
+        Task { [weak self] in
+            while true {
+                let connection: any TailnetConnection
+                do {
+                    connection = try await listener.accept()
+                } catch {
+                    break
+                }
+                guard let self else {
+                    await connection.close()
+                    return
+                }
+                await self.acceptMobile(connection, node: node, generation: current)
+            }
+            await self?.mobileListenerEnded(generation: current)
+        }
+    }
+
+    private func mobileListenerEnded(generation current: Int) {
+        guard current == generation else { return }
+        isMobileListening = false
+    }
+
+    private func acceptMobile(_ connection: any TailnetConnection, node: any TailnetNode, generation current: Int) async {
+        guard current == generation,
+            identity != nil,
+            mobileConnections.count < Self.maximumConnections,
+            let address = connection.remoteAddress,
+            let handler = mobileTCPHandler
+        else {
+            await connection.close()
+            return
+        }
+        guard await authorizedPeer(at: address, node: node, generation: current) != nil else {
+            await connection.close()
+            return
+        }
+        let id = UUID()
+        mobileConnections[id] = Task {
+            await handler(connection)
+            self.mobileConnectionClosed(id)
+        }
+    }
+
+    private func mobileConnectionClosed(_ id: UUID) {
+        mobileConnections.removeValue(forKey: id)
     }
 
     private func acceptConnections(
@@ -1335,34 +1483,50 @@ final class HTTPServerConnection: @unchecked Sendable {
         self.requestDeadline = requestDeadline
     }
 
+    typealias UpgradeHandler = @Sendable (HTTPRequestMessage, any TailnetConnection, Data) async -> Bool
+
     /// Serves requests until the client or the handler ends the connection, then closes it.
-    func serve(_ handler: Handler, streamEnded: @Sendable (String?) async -> Void) async {
-        await serveRequests(handler, streamEnded: streamEnded)
-        // No read is in progress here, so closing can't affect a reused descriptor.
-        await connection.close()
+    func serve(
+        _ handler: Handler,
+        onUpgrade: UpgradeHandler? = nil,
+        streamEnded: @Sendable (String?) async -> Void
+    ) async {
+        let upgraded = await serveRequests(handler, onUpgrade: onUpgrade, streamEnded: streamEnded)
+        if !upgraded {
+            // No read is in progress here, so closing can't affect a reused descriptor.
+            await connection.close()
+        }
     }
 
-    private func serveRequests(_ handler: Handler, streamEnded: @Sendable (String?) async -> Void) async {
+    private func serveRequests(
+        _ handler: Handler,
+        onUpgrade: UpgradeHandler?,
+        streamEnded: @Sendable (String?) async -> Void
+    ) async -> Bool {
         while let result = await readRequest() {
             // The server cancels the connection when it stops.
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             switch result {
             case .request(let message, _):
+                if let onUpgrade, await onUpgrade(message, connection, buffer) {
+                    return true
+                }
                 let (response, keepAlive) = await handler(message)
                 let shouldKeepAlive = keepAlive && message.keepAlive
                 let sent = await write(response, keepAlive: shouldKeepAlive, streamEnded: streamEnded)
-                guard sent, shouldKeepAlive else { return }
+                guard sent, shouldKeepAlive else { return false }
             case .failure(let status, let reason):
                 _ = await write(
                     .mcp(.error(statusCode: status, .invalidRequest(reason))),
                     keepAlive: false,
                     streamEnded: streamEnded
                 )
-                return
+                return false
             case .incomplete:
-                return
+                return false
             }
         }
+        return false
     }
 
     /// The next request, or `nil` when the connection closes or waits too long.

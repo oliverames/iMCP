@@ -83,6 +83,11 @@ enum FunnelPolicy {
         "https://\(host)/mcp"
     }
 
+    /// The public WebSocket URL for paired iOS devices.
+    static func mobileWebSocketURL(host: String) -> String {
+        "wss://\(host)\(MobileLink.mobileWebSocketPath)"
+    }
+
     /// The host name from the node, in the form that clients send:
     /// lowercase, without a trailing dot.
     static func normalizedHost(_ name: String) -> String {
