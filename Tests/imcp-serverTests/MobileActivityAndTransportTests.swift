@@ -497,6 +497,49 @@ final class MobileActivityAndTransportTests: XCTestCase {
             )
         )
     }
+
+    func testDevBootstrapDefaultsAndCertSeedingRespectsExistingSettings() throws {
+        let suiteName = "DevBootstrapTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let certURL = directory.appendingPathComponent("cloudflared/cert.pem")
+        DevBootstrap.seedMacDefaultsAndCertIfNeeded(defaults: defaults, containerCertURL: certURL)
+
+        if DevBootstrap.isConfigured {
+            XCTAssertEqual(defaults.string(forKey: "cloudflareTunnelHostname"), DevBootstrap.cloudflareHostname)
+            XCTAssertEqual(defaults.string(forKey: MobileService.cloudflareURLKey), DevBootstrap.cloudflareMobileURL)
+            XCTAssertEqual(ApprovalMode.current(defaults: defaults), .agentManaged)
+            if let certData = DevBootstrap.cloudflareCertData {
+                XCTAssertTrue(FileManager.default.fileExists(atPath: certURL.path))
+                XCTAssertNoThrow(try CloudflareAccount.parseCertPEM(data: certData))
+            }
+
+            // Explicit unpairing prevents re-seeding on later launches.
+            let pairingStore = MobileMemoryPairings()
+            DevBootstrap.seedMacPairingIfNeeded(
+                defaults: defaults,
+                existingDeviceIDs: { pairingStore.devices().map(\.id) },
+                existingKey: { pairingStore.key(for: $0) },
+                save: { id, name, key in
+                    try pairingStore.save(MobileDevice(id: id, name: name, pairedAt: Date()), key: key)
+                }
+            )
+            XCTAssertEqual(pairingStore.devices().map(\.id), [DevBootstrap.deviceID])
+
+            pairingStore.remove(DevBootstrap.deviceID)
+            DevBootstrap.markMacDeviceUnpaired(DevBootstrap.deviceID, defaults: defaults)
+            DevBootstrap.seedMacPairingIfNeeded(
+                defaults: defaults,
+                existingDeviceIDs: { pairingStore.devices().map(\.id) },
+                existingKey: { pairingStore.key(for: $0) },
+                save: { id, name, key in
+                    try pairingStore.save(MobileDevice(id: id, name: name, pairedAt: Date()), key: key)
+                }
+            )
+            XCTAssertTrue(pairingStore.devices().isEmpty)
+        }
+    }
 }
 
 private actor ActivityRecorder {

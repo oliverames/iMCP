@@ -56,3 +56,25 @@ mkdir -p "$(dirname "$helper_destination")"
 # Remove stale files if the nested app's contents changed between builds.
 rm -rf "$helper_destination"
 ditto "$helper_product" "$helper_destination"
+
+# Bundle cloudflared inside Contents/Helpers with sandbox-inherit entitlements when installed locally,
+# so the sandboxed Mac app can run Cloudflare Tunnel without reading outside its container.
+cloudflared_src=""
+for candidate in /opt/homebrew/bin/cloudflared /usr/local/bin/cloudflared /opt/local/bin/cloudflared; do
+    if [[ -x "$candidate" ]]; then
+        cloudflared_src="$candidate"
+        break
+    fi
+done
+cloudflared_dst="$TARGET_BUILD_DIR/$WRAPPER_NAME/Contents/Helpers/cloudflared"
+if [[ -n "$cloudflared_src" ]]; then
+    cp -fL "$cloudflared_src" "$cloudflared_dst"
+    chmod 755 "$cloudflared_dst"
+    if [[ "${CODE_SIGNING_ALLOWED:-NO}" == YES ]] && [[ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]]; then
+        codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" -o runtime --timestamp=none \
+            --entitlements "$SRCROOT/Scripts/Cloudflared.entitlements" \
+            "$cloudflared_dst"
+    fi
+else
+    rm -f "$cloudflared_dst"
+fi

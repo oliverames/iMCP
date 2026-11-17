@@ -43,12 +43,12 @@ enum ApprovalMode: String, Codable, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// Whether Mac and outbound confirmation pop-ups are skipped by iMCP.
+    /// Whether dedicated outbound confirmation pop-ups (such as `messages_send`) are skipped by iMCP.
     var skipsConfirmationPopups: Bool {
         switch self {
-        case .askEverything, .askWritesOnly:
+        case .askEverything, .askWritesOnly, .agentManaged:
             false
-        case .agentManaged, .allowEverything:
+        case .allowEverything:
             true
         }
     }

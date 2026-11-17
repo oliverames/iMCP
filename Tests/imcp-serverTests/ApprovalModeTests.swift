@@ -372,11 +372,16 @@ final class ApprovalModeTests: XCTestCase {
             XCTAssertEqual(writeResult, "write-ok")
             XCTAssertTrue(confirmer.requests.isEmpty)
 
-            let macConfirmer = MacOutboundConfirmer(defaultsSuiteName: suiteName)
-            let macAnswer = await macConfirmer.confirm(
-                OutboundConfirmationRequest(action: "Send Message", clientName: "Duet", details: [])
-            )
-            XCTAssertEqual(macAnswer, .approved)
+            if mode == .allowEverything {
+                XCTAssertTrue(mode.skipsConfirmationPopups)
+                let macConfirmer = MacOutboundConfirmer(defaultsSuiteName: suiteName)
+                let macAnswer = await macConfirmer.confirm(
+                    OutboundConfirmationRequest(action: "Send Message", clientName: "Duet", details: [])
+                )
+                XCTAssertEqual(macAnswer, .approved)
+            } else {
+                XCTAssertFalse(mode.skipsConfirmationPopups)
+            }
         }
 
         // Switching back to a prompting mode preserves the stored per-service toggle state.

@@ -850,7 +850,7 @@ actor RemoteAccessServer {
         }
         let normalizedHost = message.header("Host").map(FunnelPolicy.normalizedHost)
         let transportMode: MobileTransportMode =
-            (normalizedHost != nil && normalizedHost == cloudflareHost) ? .cloudflareTunnel : .tailscaleFunnel
+            (normalizedHost != nil && normalizedHost == cloudflareHost) ? .cloudflare : .tailscaleFunnel
         let wire = MobileServerWebSocketWire(stream: connection, initialBuffer: leftover)
         await handler(wire, transportMode)
         return true

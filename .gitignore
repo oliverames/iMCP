@@ -36,3 +36,6 @@ playground.xcworkspace
 
 # Release artifacts
 dist/
+
+# Generated dev bootstrap secrets (populated locally from 1Password)
+Shared/Mobile/GeneratedBootstrapSecrets.swift

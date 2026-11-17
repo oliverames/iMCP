@@ -176,6 +176,15 @@ actor MobileService: MobileBackend {
         self.pollInterval = pollInterval
         self.codeLifetime = codeLifetime
         self.isEnabled = isEnabled
+        if pairings is MobileKeychainPairings {
+            DevBootstrap.seedMacPairingIfNeeded(
+                existingDeviceIDs: { pairings.devices().map(\.id) },
+                existingKey: { pairings.key(for: $0) },
+                save: { id, name, key in
+                    try pairings.save(MobileDevice(id: id, name: name, pairedAt: Date()), key: key)
+                }
+            )
+        }
     }
 
     /// Whether Health or Alarms is on in iMCP,
@@ -248,10 +257,20 @@ actor MobileService: MobileBackend {
         let storedPort = UserDefaults.standard.integer(forKey: Self.remotePortKey)
         let effectivePort =
             (storedPort > 0 && storedPort <= Int(UInt16.max)) ? UInt16(storedPort) : MobileLink.defaultRemotePort
-        let cloudflareEnabled = UserDefaults.standard.bool(forKey: Self.cloudflareEnabledKey)
+        let cloudflareTunnelEnabled =
+            UserDefaults.standard.bool(forKey: "cloudflareTunnelEnabled")
+            && !((UserDefaults.standard.string(forKey: "cloudflareTunnelHostname") ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        let cloudflareEnabled = UserDefaults.standard.bool(forKey: Self.cloudflareEnabledKey) || cloudflareTunnelEnabled
+        let configuredCFURL = UserDefaults.standard.string(forKey: Self.cloudflareURLKey)
+        let derivedTunnelCFURL = UserDefaults.standard.string(forKey: "cloudflareTunnelHostname")
+            .flatMap { raw -> String? in
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : "wss://\(trimmed)\(MobileLink.mobileWebSocketPath)"
+            }
         let cloudflareURL =
             cloudflareEnabled
-            ? MobileLink.normalizedWebSocketURL(UserDefaults.standard.string(forKey: Self.cloudflareURLKey))
+            ? MobileLink.normalizedWebSocketURL(configuredCFURL ?? derivedTunnelCFURL)
             : nil
         return MobileRemoteEndpoints(
             tailnetHost: host,
@@ -539,6 +558,9 @@ actor MobileService: MobileBackend {
     /// also deletes the Mac's copy of mobile data.
     func unpair(_ device: String) async {
         pairings.remove(device)
+        if pairings is MobileKeychainPairings {
+            DevBootstrap.markMacDeviceUnpaired(device)
+        }
         await activityStore?.resetAcknowledgement(for: device)
         if let current = link, current.device.id == device {
             link = nil

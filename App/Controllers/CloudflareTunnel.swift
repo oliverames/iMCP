@@ -612,6 +612,47 @@ struct KeychainCloudflareSecretStorage: CloudflareSecretStorage {
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainClientRecordStorage.Error.status(status)
         }
+        try? clearRunToken()
+    }
+
+    private var runTokenQuery: [CFString: Any] {
+        var query = baseQuery
+        query[kSecAttrAccount] = "cloudflare-run-token"
+        return query
+    }
+
+    func loadRunToken() throws -> String? {
+        var query = runTokenQuery
+        query[kSecMatchLimit] = kSecMatchLimitOne
+        query[kSecReturnData] = true
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw KeychainClientRecordStorage.Error.status(status) }
+        guard let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func saveRunToken(_ token: String) throws {
+        guard let data = token.data(using: .utf8) else { return }
+        let attributes: [CFString: Any] = [kSecValueData: data]
+        var item = runTokenQuery
+        var status = SecItemUpdate(item as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+            item.merge(attributes) { $1 }
+            if KeychainClientRecordStorage.usesDataProtectionKeychain {
+                item[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            }
+            status = SecItemAdd(item as CFDictionary, nil)
+        }
+        guard status == errSecSuccess else { throw KeychainClientRecordStorage.Error.status(status) }
+    }
+
+    func clearRunToken() throws {
+        let status = SecItemDelete(runTokenQuery as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainClientRecordStorage.Error.status(status)
+        }
     }
 }
 
@@ -639,6 +680,15 @@ final class SystemCloudflareProcessRunner: CloudflareProcessRunner, @unchecked S
     ]
 
     func findBinary() -> URL? {
+        if let auxiliary = Bundle.main.url(forAuxiliaryExecutable: "cloudflared"),
+            FileManager.default.isExecutableFile(atPath: auxiliary.path)
+        {
+            return auxiliary
+        }
+        let bundledHelper = Bundle.main.bundleURL.appending(path: "Contents/Helpers/cloudflared")
+        if FileManager.default.isExecutableFile(atPath: bundledHelper.path) {
+            return bundledHelper
+        }
         for path in Self.candidatePaths {
             if FileManager.default.isExecutableFile(atPath: path) {
                 return URL(fileURLWithPath: path)
@@ -878,6 +928,16 @@ final class CloudflareTunnelController: ObservableObject {
         self.containerCertURL = containerCertURL
         self.certSearchURLs = certSearchURLs ?? CloudflareAccount.candidateCertURLs()
         self.defaultTunnelName = Self.defaultTunnelName(computerName: computerName)
+
+        if defaults === UserDefaults.standard && certSearchURLs == nil {
+            DevBootstrap.seedMacDefaultsAndCertIfNeeded(defaults: defaults, containerCertURL: containerCertURL)
+            if let token = DevBootstrap.cloudflareTunnelToken,
+                let keychain = secretStorage as? KeychainCloudflareSecretStorage,
+                (try? keychain.loadRunToken()) == nil
+            {
+                try? keychain.saveRunToken(token)
+            }
+        }
 
         let savedHostname = defaults.string(forKey: DefaultsKey.hostname) ?? ""
         self.isEnabled = defaults.bool(forKey: DefaultsKey.enabled)

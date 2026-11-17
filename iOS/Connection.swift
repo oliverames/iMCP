@@ -27,10 +27,27 @@ struct PhoneCredentials: Codable, Equatable, Sendable {
             kSecReturnData as String: true,
         ]
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else {
+        if SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+            let data = result as? Data,
+            let stored = try? JSONDecoder().decode(PhoneCredentials.self, from: data)
+        {
+            return stored
+        }
+        guard !MobileAppGroup.defaults.bool(forKey: DevBootstrap.iosUnpairedDefaultsKey),
+            DevBootstrap.isConfigured,
+            let keyData = DevBootstrap.deviceKeyData
+        else {
             return nil
         }
-        return try? JSONDecoder().decode(PhoneCredentials.self, from: data)
+        return PhoneCredentials(
+            device: DevBootstrap.deviceID,
+            key: keyData,
+            service: DevBootstrap.macBonjourService,
+            tailnetHost: DevBootstrap.tailnetHost,
+            tailnetPort: DevBootstrap.tailnetMobilePort,
+            funnelURL: DevBootstrap.funnelMobileURL,
+            cloudflareURL: DevBootstrap.cloudflareMobileURL
+        )
     }
 
     func save() throws {
@@ -312,6 +329,7 @@ final class PhoneConnection: ObservableObject {
             cloudflareURL: code.cloudflareURL
         ).updating(from: result.welcome)
         try credentials.save()
+        MobileAppGroup.defaults.removeObject(forKey: DevBootstrap.iosUnpairedDefaultsKey)
         // A new Mac has a new cache, which resets the outbox on its first pull.
         self.credentials = credentials
         self.channel = channel
@@ -356,6 +374,7 @@ final class PhoneConnection: ObservableObject {
             }
         }
         PhoneCredentials.delete()
+        MobileAppGroup.defaults.set(true, forKey: DevBootstrap.iosUnpairedDefaultsKey)
         try? await PhoneBackend.shared.openOutbox().deleteAll()
         PhoneActivityStore.shared.reset()
         self.credentials = nil
@@ -402,40 +421,88 @@ final class PhoneConnection: ObservableObject {
                         domain: "local.",
                         interface: nil
                     )
-                    let session = try await connectNW(
-                        endpoint: endpoint,
-                        pairing: pairing,
-                        device: device,
-                        key: key,
-                        revoke: revoke,
-                        timeout: candidateTimeout
-                    )
-                    return DialResult(
-                        channel: session.channel,
-                        transport: .localOnly,
-                        welcome: session.welcome,
-                        deviceKey: session.deviceKey
-                    )
+                    do {
+                        let session = try await connectNW(
+                            endpoint: endpoint,
+                            pairing: pairing,
+                            device: device,
+                            key: key,
+                            revoke: revoke,
+                            timeout: candidateTimeout
+                        )
+                        return DialResult(
+                            channel: session.channel,
+                            transport: .localOnly,
+                            welcome: session.welcome,
+                            deviceKey: session.deviceKey
+                        )
+                    } catch {
+                        guard pairing == nil else { throw error }
+                        let discovered = await discoverBonjourEndpoints(excludingService: service, timeout: .seconds(3))
+                        for altEndpoint in discovered {
+                            if Task.isCancelled { throw CancellationError() }
+                            if let session = try? await connectNW(
+                                endpoint: altEndpoint,
+                                pairing: nil,
+                                device: device,
+                                key: key,
+                                revoke: revoke,
+                                timeout: min(candidateTimeout, .seconds(5))
+                            ) {
+                                return DialResult(
+                                    channel: session.channel,
+                                    transport: .localOnly,
+                                    welcome: session.welcome,
+                                    deviceKey: session.deviceKey
+                                )
+                            }
+                        }
+                        throw error
+                    }
 
                 case .tailscaleVPN(let host, let port):
                     guard let nwPort = NWEndpoint.Port(rawValue: port) else {
                         throw MobileError("Invalid Tailscale port \(port).")
                     }
                     let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: nwPort)
-                    let session = try await connectNW(
-                        endpoint: endpoint,
-                        pairing: pairing,
-                        device: device,
-                        key: key,
-                        revoke: revoke,
-                        timeout: candidateTimeout
-                    )
-                    return DialResult(
-                        channel: session.channel,
-                        transport: .tailscaleVPN,
-                        welcome: session.welcome,
-                        deviceKey: session.deviceKey
-                    )
+                    do {
+                        let session = try await connectNW(
+                            endpoint: endpoint,
+                            pairing: pairing,
+                            device: device,
+                            key: key,
+                            revoke: revoke,
+                            timeout: candidateTimeout
+                        )
+                        return DialResult(
+                            channel: session.channel,
+                            transport: .tailscaleVPN,
+                            welcome: session.welcome,
+                            deviceKey: session.deviceKey
+                        )
+                    } catch {
+                        if let fallbackIP = DevBootstrap.tailnetIP,
+                            host == DevBootstrap.tailnetHost,
+                            fallbackIP != host
+                        {
+                            let ipEndpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(fallbackIP), port: nwPort)
+                            let session = try await connectNW(
+                                endpoint: ipEndpoint,
+                                pairing: pairing,
+                                device: device,
+                                key: key,
+                                revoke: revoke,
+                                timeout: candidateTimeout
+                            )
+                            return DialResult(
+                                channel: session.channel,
+                                transport: .tailscaleVPN,
+                                welcome: session.welcome,
+                                deviceKey: session.deviceKey
+                            )
+                        }
+                        throw error
+                    }
 
                 case .tailscaleFunnel(let url), .cloudflare(let url):
                     let creds: MobileDialer.Credentials
@@ -487,5 +554,43 @@ final class PhoneConnection: ObservableObject {
             throw MobileError("Missing device credentials.")
         }
         return try await MobileDialer.connect(to: endpoint, with: creds, timeout: timeout)
+    }
+
+    /// Browses `_imcp-mobile._tcp` on `local.` to find a paired Mac whose Bonjour name differs from `excludingService`.
+    private func discoverBonjourEndpoints(excludingService: String, timeout: Duration) async -> [NWEndpoint] {
+        let descriptor = NWBrowser.Descriptor.bonjour(type: MobileLink.serviceType, domain: "local.")
+        let parameters = NWParameters.tcp
+        parameters.includePeerToPeer = false
+        let browser = NWBrowser(for: descriptor, using: parameters)
+        final class EndpointCollector: @unchecked Sendable {
+            private let lock = NSLock()
+            private var seen: [NWEndpoint] = []
+
+            func append(_ endpoints: [NWEndpoint]) {
+                lock.withLock {
+                    for endpoint in endpoints where !seen.contains(endpoint) {
+                        seen.append(endpoint)
+                    }
+                }
+            }
+
+            func all() -> [NWEndpoint] {
+                lock.withLock { seen }
+            }
+        }
+        let collector = EndpointCollector()
+        browser.browseResultsChangedHandler = { results, _ in
+            let endpoints = results.compactMap { result -> NWEndpoint? in
+                if case .service(let name, _, _, _) = result.endpoint, name == excludingService {
+                    return nil
+                }
+                return result.endpoint
+            }
+            collector.append(endpoints)
+        }
+        browser.start(queue: .global())
+        try? await Task.sleep(for: timeout)
+        browser.cancel()
+        return collector.all()
     }
 }
