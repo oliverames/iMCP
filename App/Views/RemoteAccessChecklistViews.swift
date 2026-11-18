@@ -97,11 +97,17 @@ struct CloudflareChecklistView: View {
 
         VStack(alignment: .leading, spacing: 10) {
             if compact {
-                CompactChecklist(items: items, openLink: { _, url in openURL(url) }) { item in
-                    if item.kind == .signIn, cloudflare.account == nil {
-                        signInControls
+                CompactChecklist(
+                    items: items,
+                    openLink: { _, url in openURL(url) },
+                    doneTitle: cloudflare.state.activeURL == nil ? "All set" : "Connected",
+                    doneSubtitle: cloudflare.state.activeURL,
+                    inline: { item in
+                        if item.kind == .signIn, cloudflare.account == nil {
+                            signInControls
+                        }
                     }
-                }
+                )
                 if cloudflare.account != nil {
                     if cloudflare.zones.count > 1 {
                         Picker("Domain", selection: $cloudflare.selectedZoneID) {
@@ -144,7 +150,7 @@ struct CloudflareChecklistView: View {
                 }
             }
 
-            if let url = cloudflare.state.activeURL {
+            if let url = cloudflare.state.activeURL, !(compact && items.allSatisfy(\.isDone)) {
                 Label("Connected at \(url)", systemImage: "checkmark.circle.fill")
                     .font(.subheadline)
                     .foregroundStyle(.green)
@@ -155,12 +161,15 @@ struct CloudflareChecklistView: View {
                     .foregroundStyle(.red)
             }
 
-            Button("Set Up Tunnel") {
-                Task { await cloudflare.provisionAndConnect() }
+            // Once it is connected there is nothing left to set up, so the button goes in Settings.
+            if !(compact && cloudflare.state.activeURL != nil) {
+                Button("Set Up Tunnel") {
+                    Task { await cloudflare.provisionAndConnect() }
+                }
+                .checklistButton(compact: compact)
+                .disabled(!CloudflareChecklist.isReady(items) || cloudflare.state.activeURL != nil)
+                .accessibilityIdentifier("onboarding.cloudflare.setUp")
             }
-            .checklistButton(compact: compact)
-            .disabled(!CloudflareChecklist.isReady(items) || cloudflare.state.activeURL != nil)
-            .accessibilityIdentifier("onboarding.cloudflare.setUp")
         }
     }
 }
@@ -254,8 +263,12 @@ struct ChecklistRow: View {
 struct CompactChecklist<Inline: View>: View {
     let items: [ChecklistItem]
     let openLink: (ChecklistItem, URL) -> Void
+    /// What the header says when every line is done, with an optional line beneath it.
+    var doneTitle = "All set"
+    var doneSubtitle: String?
     /// Controls that belong under a line that is not done yet.
     @ViewBuilder var inline: (ChecklistItem) -> Inline
+    @State private var showsDetails = false
 
     var body: some View {
         let todo = items.filter { !$0.isDone }
@@ -272,7 +285,42 @@ struct CompactChecklist<Inline: View>: View {
                 inline(item)
             }
             if !done.isEmpty {
-                DisclosureGroup {
+                // Not a DisclosureGroup: inside a grouped Form it pushes the details far to the right.
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { showsDetails.toggle() }
+                } label: {
+                    HStack(alignment: .center, spacing: 8) {
+                        if todo.isEmpty {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .frame(width: 20, height: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(doneTitle)
+                                if let doneSubtitle {
+                                    Text(doneSubtitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                            }
+                        } else {
+                            Text("\(done.count) done").foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Text(showsDetails ? "Hide Details" : "Details")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(showsDetails ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(showsDetails ? "Expanded" : "Collapsed")
+                if showsDetails {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(done) { item in
                             ChecklistRow(
@@ -281,15 +329,6 @@ struct CompactChecklist<Inline: View>: View {
                                 openLink: { openLink(item, $0) }
                             )
                         }
-                    }
-                    .padding(.top, 4)
-                } label: {
-                    if todo.isEmpty {
-                        Label("All set", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Text("\(done.count) done")
-                            .foregroundStyle(.secondary)
                     }
                 }
             }

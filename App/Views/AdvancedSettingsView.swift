@@ -6,6 +6,7 @@ struct AdvancedSettingsView: View {
     @ObservedObject var serverController: ServerController
 
     @State private var hostnameDraft = ""
+    @State private var showsPhoneOverrides = false
     @State private var isEnteringAuthKey = false
     @State private var editingToken: EditingToken?
     @State private var revealedSecret: RevealedSecret?
@@ -53,7 +54,11 @@ struct AdvancedSettingsView: View {
             MobileDetailsSection()
 
             Section {
-                DisclosureGroup {
+                ExpandableRow(isExpanded: $showsPhoneOverrides) {
+                    RowLabel(title: "Phone connection overrides") {
+                        SettingsIcon(symbol: "ipad.and.iphone", color: .blue)
+                    }
+                } content: {
                     Toggle(isOn: $tailscaleVPNEnabled) {
                         RowLabel(title: "Allow Tailscale") {
                             SettingsIcon(symbol: "lock.shield", color: .indigo)
@@ -109,10 +114,6 @@ struct AdvancedSettingsView: View {
                                 SettingsIcon(symbol: "number", color: .gray)
                             }
                         }
-                    }
-                } label: {
-                    RowLabel(title: "Phone connection overrides") {
-                        SettingsIcon(symbol: "ipad.and.iphone", color: .blue)
                     }
                 }
             }

@@ -28,12 +28,20 @@ struct ClientsSettingsView: View {
                     clientRow(client, publicURL: publicURL)
                 }
                 if let publicURL {
-                    LabeledContent {
-                        Button("Copy") { copyToSettingsPasteboard(publicURL) }
-                    } label: {
-                        RowLabel(title: "Connector address", subtitle: publicURL) {
-                            SettingsIcon(symbol: "link", color: .teal)
+                    ExpandableRow(isExpanded: expansion(of: "connectorAddress")) {
+                        LabeledContent {
+                            Button("Copy") { copyToSettingsPasteboard(publicURL) }
+                        } label: {
+                            RowLabel(title: "Connector address", subtitle: publicURL) {
+                                SettingsIcon(symbol: "link", color: .teal)
+                            }
                         }
+                    } content: {
+                        Text(
+                            "Copy this address. In your AI app, add a custom connector and paste it. The first time the app connects, iMCP asks once to allow it."
+                        )
+                        .font(.callout)
+                        .padding(.vertical, 4)
                     }
                 } else {
                     LabeledContent {
@@ -96,7 +104,19 @@ struct ClientsSettingsView: View {
     private func clientRow(_ client: KnownClient, publicURL: String?) -> some View {
         let mode = serverController.approvalMode
         let instruction = mode.agentInstructions.first { $0.id == client.instructionID }
-        return DisclosureGroup(isExpanded: expansion(of: client.id)) {
+        return ExpandableRow(isExpanded: expansion(of: client.id)) {
+            LabeledContent {
+                clientAction(client, publicURL: publicURL)
+            } label: {
+                HStack(spacing: 10) {
+                    ClientLogo(client: client, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(client.name)
+                        clientStatus(client, hasAddress: publicURL != nil)
+                    }
+                }
+            }
+        } content: {
             VStack(alignment: .leading, spacing: 8) {
                 Text(client.steps)
                 if let instruction {
@@ -116,18 +136,6 @@ struct ClientsSettingsView: View {
             }
             .font(.callout)
             .padding(.vertical, 4)
-        } label: {
-            LabeledContent {
-                clientAction(client, publicURL: publicURL)
-            } label: {
-                HStack(spacing: 10) {
-                    ClientLogo(client: client, size: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(client.name)
-                        clientStatus(client, hasAddress: publicURL != nil)
-                    }
-                }
-            }
         }
     }
 

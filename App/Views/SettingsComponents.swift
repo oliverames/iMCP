@@ -91,6 +91,38 @@ struct StatusBadge: View {
     }
 }
 
+/// A row that opens to show more beneath it. The arrow sits at the trailing edge, so the row's icon lines up
+/// with every other row; a `DisclosureGroup` puts its arrow at the leading edge and pushes the icon right.
+struct ExpandableRow<Label: View, Content: View>: View {
+    @Binding var isExpanded: Bool
+    @ViewBuilder var label: () -> Label
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                label()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "Hide details" : "Show details")
+            }
+            if isExpanded {
+                content()
+            }
+        }
+    }
+}
+
 /// The label of a row: an icon, a title, and at most one short line beneath.
 struct RowLabel<Icon: View>: View {
     let title: String

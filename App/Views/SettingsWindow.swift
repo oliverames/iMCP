@@ -57,6 +57,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
+        // The first text field would otherwise open with its text selected.
+        DispatchQueue.main.async { window.makeFirstResponder(nil) }
     }
 
     /// Builds the window. Debug screenshots build it too, so they draw the same structure.
