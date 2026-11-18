@@ -37,24 +37,25 @@ struct MenuServiceItem: Equatable, Identifiable {
 enum MenuSection: Equatable {
     /// The "Enable MCP Server" switch, and status lines under it.
     case server(isOn: Bool, status: [String])
-    /// The services, in a submenu.
-    case services(items: [MenuServiceItem], isEnabled: Bool)
+    /// The services, under a "Services" header. Not shown while the server is off.
+    case services(items: [MenuServiceItem])
     case actions([MenuAction])
 }
 
 /// What the menu bar menu contains, built from the app's state so that tests can check it.
 ///
-/// The menu is a native menu, so SwiftUI and AppKit own the spacing, highlight,
-/// keyboard navigation, and VoiceOver. This only decides which items appear, and in which groups.
+/// This only decides which items appear, and in which groups; ``ContentView`` draws them.
 enum MenuStructure {
     static func make(
         isServerEnabled: Bool,
         services: [MenuServiceItem],
         status: [String]
     ) -> [MenuSection] {
-        return [
-            .server(isOn: isServerEnabled, status: isServerEnabled ? status : []),
-            .services(items: services, isEnabled: isServerEnabled),
+        var sections: [MenuSection] = [
+            .server(isOn: isServerEnabled, status: isServerEnabled ? status : [])
+        ]
+        if isServerEnabled { sections.append(.services(items: services)) }
+        return sections + [
             .actions([.setUp, .configureClaudeDesktop, .configureClaudeCode, .copyServerCommand]),
             .actions([.settings, .checkForUpdates, .about]),
             .actions([.quit]),
