@@ -140,7 +140,7 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         id: "claudeCode",
         name: "Claude Code",
         kind: .onThisMac,
-        logoAsset: nil,
+        logoAsset: "ConnectorClaudeCode",
         symbol: "terminal",
         instructionID: "claude-code",
         steps: "Press Set Up. iMCP adds itself to Claude Code.",

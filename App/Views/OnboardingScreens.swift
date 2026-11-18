@@ -244,7 +244,7 @@ struct ConnectAppsScreen: View {
                 )
                 Divider().padding(.horizontal, OnboardingSpacing.medium)
                 appRow(
-                    symbol: "terminal",
+                    logo: "ConnectorClaudeCode",
                     name: "Claude Code",
                     detail: nil,
                     isSetUp: ClaudeCode.isConfigured,
