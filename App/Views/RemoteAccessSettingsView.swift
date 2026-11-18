@@ -149,17 +149,10 @@ struct RemoteAccessSettingsView: View {
             CloudflareChecklistView(cloudflare: cloudflare, compact: true)
 
             if cloudflare.account != nil {
-                if case .connected = cloudflare.state, isHostnameDirty {
-                    Button {
-                        Task { await cloudflare.provisionAndConnect() }
-                    } label: {
-                        RowLabel(title: "Update and reconnect") {
-                            SettingsIcon(symbol: "arrow.triangle.2.circlepath", color: .blue)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
                 HStack {
+                    if case .connected = cloudflare.state, isHostnameDirty {
+                        Button("Update and Reconnect") { Task { await cloudflare.provisionAndConnect() } }
+                    }
                     Button("Refresh Domains") { Task { await cloudflare.refreshZones() } }
                     Button("Log Out of Cloudflare…", role: .destructive) { isConfirmingCloudflareLogOut = true }
                     Spacer(minLength: 0)
