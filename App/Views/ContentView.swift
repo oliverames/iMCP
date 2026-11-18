@@ -1,5 +1,4 @@
 import AppKit
-import OSLog
 import Sparkle
 import SwiftUI
 
@@ -74,12 +73,11 @@ struct ContentView: View {
                 view(for: section)
             }
         }
-        .frame(width: MenuMetrics.width)
+        .frame(minWidth: MenuMetrics.width, maxWidth: .infinity)
         .padding(.vertical, MenuMetrics.edge)
         .onGeometryChange(for: CGSize.self) { proxy in
             proxy.size
         } action: { size in
-            menuPanel.contentWidth = size.width
             menuPanel.contentHeight = size.height
             menuPanel.resizeToFitContent()
         }
@@ -203,8 +201,6 @@ enum MenuMetrics {
 /// Resizes the `MenuBarExtra` panel that shows ``ContentView`` to fit its content.
 @MainActor
 final class MenuPanelController {
-    private let log = Logger(subsystem: "com.amesconsulting.imcp.mac", category: "menu.panel")
-    var contentWidth: CGFloat = 0
     var contentHeight: CGFloat = 0
 
     private weak var window: NSWindow?
@@ -233,59 +229,25 @@ final class MenuPanelController {
         resizeToFitContent()
     }
 
-    // MenuBarExtra's window keeps whatever size the system first gave it. When the content is narrower
-    // or shorter, the content floats in an oversized panel, with wide margins on both sides.
-    // Resize the window to the content, keeping it centered under the menu bar item and on screen.
+    // MenuBarExtra's window keeps a stale taller frame when its content shrinks,
+    // leaving the content vertically centered in an oversized panel. Resize the height to fit.
+    // The width is the system's: it puts a changed width back, so the content fills whatever
+    // width the window has instead (see `ContentView.body`).
     func resizeToFitContent() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.window, self.contentHeight > 0, self.contentWidth > 0 else {
-                self?.log.notice(
-                    "resize skipped: window \(self?.window != nil, privacy: .public) content \(self?.contentWidth ?? 0, privacy: .public)x\(self?.contentHeight ?? 0, privacy: .public)"
-                )
-                return
-            }
+            guard let self, let window = self.window, self.contentHeight > 0 else { return }
             let frame = window.frame
-            guard abs(frame.height - self.contentHeight) > 0.5 || abs(frame.width - self.contentWidth) > 0.5
-            else {
-                self.describe("already fits \(self.contentWidth)x\(self.contentHeight)", window)
-                return
-            }
-            self.describe("before resize to \(self.contentWidth)x\(self.contentHeight)", window)
-            var x = frame.midX - self.contentWidth / 2
-            if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
-                x = min(max(x, visible.minX + 4), visible.maxX - self.contentWidth - 4)
-            }
+            guard abs(frame.height - self.contentHeight) > 0.5 else { return }
             window.setFrame(
                 NSRect(
-                    x: x,
+                    x: frame.minX,
                     y: frame.maxY - self.contentHeight,
-                    width: self.contentWidth,
+                    width: frame.width,
                     height: self.contentHeight
                 ),
                 display: true
             )
-            self.describe("after resize", window)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak window] in
-                guard let self, let window else { return }
-                self.describe("0.3s later", window)
-            }
         }
-    }
-
-    private func describe(_ event: String, _ window: NSWindow) {
-        let content = window.contentView
-        log.notice(
-            """
-            \(event, privacy: .public): window \(NSStringFromRect(window.frame), privacy: .public), \
-            contentView \(NSStringFromRect(content?.frame ?? .zero), privacy: .public), \
-            contentLayoutRect \(NSStringFromRect(window.contentLayoutRect), privacy: .public), \
-            safeArea \(String(describing: content?.safeAreaInsets), privacy: .public), \
-            style \(window.styleMask.rawValue, privacy: .public), \
-            class \(String(describing: type(of: window)), privacy: .public), \
-            contentClass \(String(describing: content.map { type(of: $0) }), privacy: .public), \
-            subviews \(content?.subviews.map { NSStringFromRect($0.frame) }.joined(separator: " | ") ?? "", privacy: .public)
-            """
-        )
     }
 }
 
