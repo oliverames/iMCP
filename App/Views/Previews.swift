@@ -4,17 +4,20 @@ import SwiftUI
 // Previews build a ServerController, which starts iMCP's network manager.
 // They keep the server off (`isEnabled` is false) and don't toggle services.
 
-#Preview("Menu panel") {
-    ContentView(
-        serverManager: ServerController(),
-        isEnabled: .constant(false),
-        updater: SPUStandardUpdaterController(
-            startingUpdater: false,
-            updaterDelegate: nil,
-            userDriverDelegate: nil
-        ).updater
-    )
-    .frame(width: 280)
+#Preview("Menu") {
+    // A native menu renders its items in a list here, not as a real menu.
+    VStack(alignment: .leading) {
+        ContentView(
+            serverManager: ServerController(),
+            isEnabled: .constant(false),
+            updater: SPUStandardUpdaterController(
+                startingUpdater: false,
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            ).updater
+        )
+    }
+    .padding()
 }
 
 #Preview("Settings") {
@@ -37,4 +40,12 @@ import SwiftUI
         ServiceSettingsView(serverController: controller, config: config)
             .frame(width: 500, height: 560)
     }
+}
+
+#Preview("Set Up iMCP") {
+    OnboardingWizardView(
+        serverController: ServerController(),
+        isEnabled: .constant(false),
+        onFinish: {}
+    )
 }

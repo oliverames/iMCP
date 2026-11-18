@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B15000000000000000000002 /* ../../App/Models/MenuStructure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */; };
+		B15000000000000000000004 /* MenuStructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000003 /* MenuStructureTests.swift */; };
 		0C442369FEFC71CA64EFDDCD /* MobileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E70399C0AD0A7EF1C0755801 /* MobileCacheTests.swift */; };
 		0EBDDCD81AB193D1DCDA3616 /* ../../Shared/Mobile/MobileDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 528763F26319BDDB15541474 /* ../../Shared/Mobile/MobileDatabase.swift */; };
 		1201B5B17FF1368F8E9CD48F /* ../../Shared/Mobile/MobileTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEA9566F574C683C4FB198FB /* ../../Shared/Mobile/MobileTransport.swift */; };
@@ -196,6 +198,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/MenuStructure.swift; sourceTree = "<group>"; };
+		B15000000000000000000003 /* MenuStructureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuStructureTests.swift; sourceTree = "<group>"; };
 		485454500000000000000014 /* ../../App/Controllers/FunnelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Controllers/FunnelAccess.swift; sourceTree = "<group>"; };
 		485454500000000000000013 /* ../../App/Controllers/RemoteAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Controllers/RemoteAccess.swift; sourceTree = "<group>"; };
 		485454500000000000000010 /* RemoteAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessTests.swift; sourceTree = "<group>"; };
@@ -554,6 +558,8 @@
 				B13500000000000000000011 /* ../../App/Services/NotesWriting.swift */,
 				B13500000000000000000012 /* ../../App/Services/NotesWriteTools.swift */,
 				B13800000000000000000010 /* ApprovalModeTests.swift */,
+				B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */,
+				B15000000000000000000003 /* MenuStructureTests.swift */,
 				B13800000000000000000020 /* ../../Shared/Models/ApprovalMode.swift */,
 				B14000000000000000000010 /* CalendarSelectionTests.swift */,
 				B14000000000000000000011 /* ../../App/Services/CalendarSelection.swift */,
@@ -1021,6 +1027,8 @@
 				B13500000000000000000021 /* ../../App/Services/NotesWriting.swift in Sources */,
 				B13500000000000000000022 /* ../../App/Services/NotesWriteTools.swift in Sources */,
 				B13800000000000000000011 /* ApprovalModeTests.swift in Sources */,
+				B15000000000000000000002 /* ../../App/Models/MenuStructure.swift in Sources */,
+				B15000000000000000000004 /* MenuStructureTests.swift in Sources */,
 				B13800000000000000000021 /* ../../Shared/Models/ApprovalMode.swift in Sources */,
 				B14000000000000000000020 /* CalendarSelectionTests.swift in Sources */,
 				B14000000000000000000021 /* ../../App/Services/CalendarSelection.swift in Sources */,

@@ -50,7 +50,11 @@ struct App: SwiftUI.App {
                 #endif
             }
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
+        .onChange(of: isEnabled) { _, isEnabled in
+            // The menu's content isn't alive while the menu is closed, so sync the server here.
+            Task { await serverController.setEnabled(isEnabled) }
+        }
         .onChange(of: showMenuBarExtra) { _, showMenuBarExtra in
             appDelegate.isMenuBarExtraInserted = showMenuBarExtra
         }
