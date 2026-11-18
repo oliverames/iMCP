@@ -122,7 +122,9 @@ struct StatusView: View {
                     )
                 }
 
-                ActivitySection(activity: activity)
+                if connection.credentials?.configuration?.features.activityHistory ?? true {
+                    ActivitySection(activity: activity)
+                }
 
                 ForEach(MobileDomain.allCases, id: \.self) { domain in
                     ServiceSection(domain: domain)
@@ -354,6 +356,8 @@ struct TransportSettingsView: View {
     @State private var funnelURL: String
     @State private var cloudflareURL: String
     @State private var error: String?
+    @State private var isRefreshing = false
+    @State private var refreshMessage: String?
 
     init(connection: PhoneConnection) {
         self.connection = connection
@@ -369,6 +373,8 @@ struct TransportSettingsView: View {
 
     var body: some View {
         Form {
+            configurationSection
+
             Section {
                 Picker("Transport Mode", selection: $selectedMode) {
                     ForEach(MobileTransportMode.allCases, id: \.self) { mode in
@@ -381,11 +387,13 @@ struct TransportSettingsView: View {
                 Text("Connection Mode")
             } footer: {
                 Text(
-                    "Automatic tries Local Network first, then Tailscale VPN, Tailscale Funnel, and Cloudflare Tunnel."
+                    connection.credentials?.configuration == nil
+                        ? "Automatic tries Local Network first, then Cloudflare Tunnel, Tailscale VPN, and Tailscale Funnel."
+                        : "Automatic follows the Mac: it tries the routes in the order the Mac lists them above. Choose another mode to use one route only."
                 )
             }
 
-            if connection.credentials != nil {
+            if connection.credentials != nil, connection.credentials?.configuration == nil {
                 Section("Tailscale VPN") {
                     TextField("Mac Tailscale Host or IP", text: $tailnetHost)
                         .textInputAutocapitalization(.never)
@@ -430,6 +438,64 @@ struct TransportSettingsView: View {
         .onChange(of: selectedMode) { _, mode in
             connection.setTransportMode(mode)
         }
+    }
+
+    @ViewBuilder
+    private var configurationSection: some View {
+        if let configuration = connection.credentials?.configuration {
+            Section {
+                LabeledContent("Configured by", value: "\(configuration.macName) (revision \(configuration.revision))")
+                ForEach(Array(configuration.routes.enumerated()), id: \.element.id) { index, route in
+                    LabeledContent("\(index + 1). \(route.label)", value: status(of: route))
+                }
+                refreshButton
+            } header: {
+                Text("Routes From Your Mac")
+            } footer: {
+                Text(
+                    "Your Mac decides which routes to offer and in what order. Change them in iMCP on the Mac, in the iPhone & iPad settings. This phone updates when it connects."
+                )
+            }
+        } else if connection.credentials != nil {
+            Section {
+                refreshButton
+            } footer: {
+                Text(
+                    "This phone hasn't received a configuration from the Mac yet. It uses the addresses it was set up with."
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var refreshButton: some View {
+        Button {
+            Task {
+                isRefreshing = true
+                refreshMessage = nil
+                refreshMessage = await connection.refreshConfiguration()
+                isRefreshing = false
+            }
+        } label: {
+            HStack {
+                Text("Refresh Configuration")
+                if isRefreshing {
+                    Spacer()
+                    ProgressView()
+                }
+            }
+        }
+        .disabled(isRefreshing)
+        if let refreshMessage {
+            Text(refreshMessage).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private func status(of route: MobileRoute) -> String {
+        if connection.phase == .connected, connection.activeTransport == route.kind.mode { return "Connected" }
+        let mode = connection.transportMode
+        if mode != .automatic, mode != route.kind.mode { return "Not used in this mode" }
+        return "Ready"
     }
 
     private func save() {

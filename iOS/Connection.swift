@@ -15,6 +15,9 @@ struct PhoneCredentials: Codable, Equatable, Sendable {
     var tailnetPort: UInt16?
     var funnelURL: String?
     var cloudflareURL: String?
+    /// What the Mac last told this phone to use. Once present, it decides the routes and their order,
+    /// and the baked-in bootstrap above is never consulted again.
+    var configuration: MobileConfiguration?
 
     private static let account = "pairing"
     private static let keychainService = "co.dododo.iMCP.iOS"
@@ -76,27 +79,53 @@ struct PhoneCredentials: Codable, Equatable, Sendable {
     }
 
     var macName: String {
-        service.hasPrefix("iMCP on ") ? String(service.dropFirst("iMCP on ".count)) : service
+        if let name = configuration?.macName, !name.isEmpty { return name }
+        return service.hasPrefix("iMCP on ") ? String(service.dropFirst("iMCP on ".count)) : service
     }
 
     var endpoint: NWEndpoint {
         .service(name: service, type: MobileLink.serviceType, domain: "local.", interface: nil)
     }
 
+    private var routes: MobilePhoneRoutes {
+        get {
+            MobilePhoneRoutes(
+                service: service,
+                tailnetHost: tailnetHost,
+                tailnetPort: tailnetPort,
+                funnelURL: funnelURL,
+                cloudflareURL: cloudflareURL,
+                configuration: configuration
+            )
+        }
+        set {
+            service = newValue.service
+            tailnetHost = newValue.tailnetHost
+            tailnetPort = newValue.tailnetPort
+            funnelURL = newValue.funnelURL
+            cloudflareURL = newValue.cloudflareURL
+            configuration = newValue.configuration
+        }
+    }
+
+    /// The endpoints to try for `mode`, in order. The Mac's configuration decides once the phone has one;
+    /// until then the addresses from pairing or the bootstrap are used.
+    func candidates(for mode: MobileTransportMode) -> [MobileTransportCandidate] {
+        routes.candidates(for: mode)
+    }
+
+    /// Follows `configuration` if it is newer than the one this phone holds, or returns nil.
+    func applying(_ configuration: MobileConfiguration) -> PhoneCredentials? {
+        guard let updated = routes.applying(configuration) else { return nil }
+        var copy = self
+        copy.routes = updated
+        return copy
+    }
+
+    /// Takes what the Mac says in its welcome.
     func updating(from welcome: MobileWelcome) -> PhoneCredentials {
         var copy = self
-        if let host = welcome.tailnetHost, !host.isEmpty {
-            copy.tailnetHost = host
-        }
-        if let port = welcome.tailnetPort, port > 0 {
-            copy.tailnetPort = port
-        }
-        if let funnel = MobileLink.normalizedWebSocketURL(welcome.funnelURL) {
-            copy.funnelURL = funnel
-        }
-        if let cloudflare = MobileLink.normalizedWebSocketURL(welcome.cloudflareURL) {
-            copy.cloudflareURL = cloudflare
-        }
+        copy.routes = routes.updating(from: welcome)
         return copy
     }
 }
@@ -174,6 +203,42 @@ final class PhoneConnection: ObservableObject {
         start()
     }
 
+    // MARK: - Configuration
+
+    /// Applies a configuration that the Mac pushed with `config_apply`.
+    /// Returns the revision this phone holds afterwards, which the Mac shows.
+    func applyConfiguration(_ configuration: MobileConfiguration) -> MobileConfigApplyResponse {
+        guard let current = credentials else {
+            return MobileConfigApplyResponse(revision: 0, applied: false)
+        }
+        guard let updated = current.applying(configuration) else {
+            return MobileConfigApplyResponse(revision: current.configuration?.revision ?? 0, applied: false)
+        }
+        do {
+            try updated.save()
+        } catch {
+            log.error("Couldn't save the Mac's configuration: \(error.localizedDescription, privacy: .public)")
+            return MobileConfigApplyResponse(revision: current.configuration?.revision ?? 0, applied: false)
+        }
+        credentials = updated
+        return MobileConfigApplyResponse(revision: configuration.revision, applied: true)
+    }
+
+    /// Reconnects so the Mac sends its configuration again, and waits for the result.
+    /// Returns an error message, or nil when the phone connected.
+    func refreshConfiguration(limit: Duration = .seconds(10)) async -> String? {
+        guard credentials != nil else { return "This device isn't paired with a Mac." }
+        stop()
+        start()
+        let deadline = ContinuousClock.now.advanced(by: limit)
+        while ContinuousClock.now < deadline {
+            if phase == .connected { return nil }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        if case .failed(let message) = phase { return message }
+        return "The Mac didn't answer. The phone keeps the configuration it has."
+    }
+
     // MARK: - Connection
 
     /// The one dial in flight. The foreground loop, a background flush, and a refresh
@@ -245,13 +310,7 @@ final class PhoneConnection: ObservableObject {
 
     private func establish(_ credentials: PhoneCredentials, total: Duration) async throws {
         let result = try await dial(
-            transportMode.candidates(
-                service: credentials.service,
-                tailnetHost: credentials.tailnetHost,
-                tailnetPort: credentials.tailnetPort,
-                funnelURL: credentials.funnelURL,
-                cloudflareURL: credentials.cloudflareURL
-            ),
+            credentials.candidates(for: transportMode),
             mode: transportMode,
             device: credentials.device,
             key: SymmetricKey(data: credentials.key),
@@ -402,7 +461,8 @@ final class PhoneConnection: ObservableObject {
             tailnetHost: code.tailnetHost,
             tailnetPort: code.tailnetPort,
             funnelURL: code.funnelURL,
-            cloudflareURL: code.cloudflareURL
+            cloudflareURL: code.cloudflareURL,
+            configuration: nil
         ).updating(from: result.welcome)
         try credentials.save()
         MobileAppGroup.defaults.removeObject(forKey: DevBootstrap.iosUnpairedDefaultsKey)
@@ -423,13 +483,7 @@ final class PhoneConnection: ObservableObject {
         let credentials = self.credentials
         stop()
         if let credentials {
-            let candidates = transportMode.candidates(
-                service: credentials.service,
-                tailnetHost: credentials.tailnetHost,
-                tailnetPort: credentials.tailnetPort,
-                funnelURL: credentials.funnelURL,
-                cloudflareURL: credentials.cloudflareURL
-            )
+            let candidates = credentials.candidates(for: transportMode)
             // The Mac forgets the device when it can verify the request; if it's away,
             // the user can remove the phone in iMCP Settings.
             if let result = try? await dial(
@@ -559,7 +613,9 @@ final class PhoneConnection: ObservableObject {
                             deviceKey: session.deviceKey
                         )
                     } catch {
-                        if let fallbackIP = DevBootstrap.tailnetIP,
+                        // The bootstrap's address is a fallback for a phone that hasn't learned the Mac's configuration.
+                        if credentials?.configuration == nil,
+                            let fallbackIP = DevBootstrap.tailnetIP,
                             host == DevBootstrap.tailnetHost,
                             fallbackIP != host
                         {

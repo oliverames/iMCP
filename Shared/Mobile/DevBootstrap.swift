@@ -6,7 +6,25 @@ import Foundation
 /// Populated locally from the 1Password `Development` vault via
 /// `Scripts/generate-bootstrap-secrets.sh`. When secrets are absent (e.g. CI),
 /// `isConfigured` is `false` and all bootstrap helpers are no-ops.
+///
+/// The Mac is the source of truth for the phone's configuration: the phone connects once with
+/// this bootstrap, receives a `MobileConfiguration` from the Mac, persists it, and from then on
+/// ignores the bootstrap. It is a fallback for a phone that has learned nothing yet.
+///
+/// A build can omit the bootstrap entirely by defining the `IMCP_OMIT_BOOTSTRAP` compile-time
+/// flag (`SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) IMCP_OMIT_BOOTSTRAP`). Every
+/// accessor then reports "not configured" and the build behaves like the upstream app,
+/// which pairs with a QR code and learns everything from the Mac.
 enum DevBootstrap {
+    /// Whether this build carries the bootstrap. False when `IMCP_OMIT_BOOTSTRAP` is defined.
+    static let isEnabled: Bool = {
+        #if IMCP_OMIT_BOOTSTRAP
+            return false
+        #else
+            return true
+        #endif
+    }()
+
     static let iosUnpairedDefaultsKey = "devBootstrap.iosUnpaired"
     static let macUnpairedDeviceIDsKey = "devBootstrap.macUnpairedDeviceIDs"
     static let macApprovalModeSeededKey = "devBootstrap.macApprovalModeSeeded"
@@ -33,7 +51,7 @@ enum DevBootstrap {
     }
 
     static var isConfigured: Bool {
-        DevBootstrapSecrets.isConfigured && !deviceID.isEmpty && deviceKeyData != nil
+        isEnabled && DevBootstrapSecrets.isConfigured && !deviceID.isEmpty && deviceKeyData != nil
     }
 
     static var macBonjourService: String {
@@ -52,6 +70,7 @@ enum DevBootstrap {
     }
 
     static var tailnetIP: String? {
+        guard isEnabled else { return nil }
         let trimmed = DevBootstrapSecrets.tailnetIP.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
