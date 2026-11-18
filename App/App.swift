@@ -38,8 +38,8 @@ struct App: SwiftUI.App {
             HStack(spacing: 3) {
                 Image(#"MenuIcon-\#(isEnabled ? "On" : "Off")"#)
                 #if DEBUG
-                Text("DEV")
-                    .font(.system(size: 9, weight: .heavy, design: .rounded))
+                    Text("DEV")
+                        .font(.system(size: 9, weight: .heavy, design: .rounded))
                 #endif
             }
         }
@@ -58,7 +58,8 @@ struct App: SwiftUI.App {
             appDelegate.shouldCheckOnboarding = false
             let defaults = UserDefaults.standard
             let hasSeen = defaults.bool(forKey: OnboardingGate.seenDefaultsKey)
-            let hasTrusted = !serverController.trustedClients.isEmpty || !serverController.oauthConnections.grants.isEmpty
+            let hasTrusted =
+                !serverController.trustedClients.isEmpty || !serverController.oauthConnections.grants.isEmpty
             let hasConnected = !serverController.activePublicURLs.isEmpty
             let hasServiceBeyondDefaults = serverController.computedServiceConfigs.contains {
                 $0.name != "Maps" && $0.name != "Utilities" && $0.binding.wrappedValue
@@ -108,12 +109,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if UserDefaults.standard.object(forKey: "showMenuBarExtra") as? Bool == false {
             shouldOpenSettings = true
         }
-    }
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        // iMCP Helper's Open iMCP button opens imcp://pair, which only opens the pairing window.
-        guard urls.contains(where: HomeHelperPairing.isPairingURL) else { return }
-        Task { await HomeService.shared.pairFromURL() }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
