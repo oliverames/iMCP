@@ -8,17 +8,13 @@ struct MobileSettingsView: View {
     @State private var devices: [MobileDevice] = []
     @State private var connected: MobileDevice?
     @State private var connectedTransport: MobileTransportMode?
-    @State private var syncedAt: [MobileDomain: Date] = [:]
     @State private var code: MobilePairingCode?
     @State private var expires: Date?
     @State private var error: String?
-    @State private var confirmingDelete = false
     @State private var removing: MobileDevice?
     @AppStorage(RemoteApprovals.defaultsKey) private var approveOnIPhone = true
     @AppStorage(MobileService.transportModeKey) private var transportModeRaw = MobileTransportMode.automatic.rawValue
     @State private var routes: [MobileConfigurationBuilder.Entry] = []
-    @State private var configurationRevision = 0
-    @State private var appliedRevisions: [String: Int] = [:]
     @AppStorage(MobileService.activityHistoryKey) private var activityHistoryEnabled = true
 
     private var transportMode: Binding<MobileTransportMode> {
@@ -104,27 +100,6 @@ struct MobileSettingsView: View {
             .onChange(of: activityHistoryEnabled) { _, _ in applyTransportSettings() }
             .onChange(of: transportModeRaw) { _, _ in applyTransportSettings() }
 
-            Section {
-                DisclosureGroup("Details") {
-                    LabeledContent("Configuration revision", value: String(configurationRevision))
-                    ForEach(devices) { device in
-                        LabeledContent(device.name, value: configurationSummary(for: device))
-                    }
-                    ForEach(routes.filter { $0.address != nil }) { entry in
-                        LabeledContent(entry.kind.settingsName) {
-                            Text(entry.address ?? "")
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                    ForEach(MobileDomain.allCases, id: \.self) { domain in
-                        LabeledContent(domain.label, value: syncText(domain))
-                    }
-                    Button("Delete Cached Data…", role: .destructive) { confirmingDelete = true }
-                }
-            }
         }
         .formStyle(.grouped)
         .navigationTitle("iPhone & iPad")
@@ -145,21 +120,6 @@ struct MobileSettingsView: View {
             if let code, let expires {
                 pairingSheet(code, expires: expires)
             }
-        }
-        .alert("Delete the cached data?", isPresented: $confirmingDelete) {
-            Button("Cancel", role: .cancel) {}
-            Button("Delete", role: .destructive) {
-                Task {
-                    do {
-                        try await MobileService.shared.deleteCache()
-                    } catch {
-                        self.error = error.localizedDescription
-                    }
-                    await refresh()
-                }
-            }
-        } message: {
-            Text("Paired devices send their data again the next time they connect.")
         }
         .alert(
             "Unpair \(removing?.name ?? "this device")?",
@@ -222,12 +182,6 @@ struct MobileSettingsView: View {
         return entry.isOffered ? nil : "Not offered in local-only mode"
     }
 
-    private func configurationSummary(for device: MobileDevice) -> String {
-        guard let applied = appliedRevisions[device.id] else { return "Not confirmed" }
-        return applied == configurationRevision
-            ? "Revision \(applied)" : "Revision \(applied), Mac is on \(configurationRevision)"
-    }
-
     private func pairingSheet(_ code: MobilePairingCode, expires: Date) -> some View {
         VStack(spacing: 16) {
             if let image = Self.qrImage(code.url.absoluteString) {
@@ -279,13 +233,6 @@ struct MobileSettingsView: View {
         connected = await service.connectedDevice
         connectedTransport = await service.connectedTransport
         routes = MobileConfigurationBuilder.entries(await service.currentState)
-        configurationRevision = await service.currentConfiguration.revision
-        for device in devices {
-            appliedRevisions[device.id] = await service.appliedConfigurationRevision(for: device.id)
-        }
-        for domain in MobileDomain.allCases {
-            syncedAt[domain] = await service.syncedAt(domain)
-        }
         let pairing = await service.isPairing
         if code != nil, !pairing {
             // The code was used or expired.
@@ -326,12 +273,6 @@ struct MobileSettingsView: View {
         MobileService.setRouteOrder(order)
         routes = order.compactMap { kind in routes.first { $0.kind == kind } }
         applyTransportSettings()
-    }
-
-    private func syncText(_ domain: MobileDomain) -> String {
-        guard let date = syncedAt[domain] else { return "Never synced" }
-        let stale = MobileEnvelope.isStale(domain, syncedAt: date, now: Date())
-        return "Synced \(date.formatted(.relative(presentation: .named)))\(stale ? " (stale)" : "")"
     }
 
     private static func qrImage(_ text: String) -> NSImage? {

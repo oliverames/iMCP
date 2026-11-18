@@ -5,7 +5,7 @@ import SwiftUI
 struct ClientsSettingsView: View {
     @ObservedObject var serverController: ServerController
     @ObservedObject private var oauthConnections: OAuthConnectionsModel
-    @AppStorage("settingsPane") private var tab = SettingsTab.clients
+    @AppStorage("settingsPane") private var tab = SettingsPane.clients
     @State private var isConfirmingRemoveAll = false
     @State private var expanded: Set<String> = []
     /// Read again after Claude Desktop or Claude Code is set up.

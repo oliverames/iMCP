@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Advanced tab: developer options and settings that people rarely change.
+/// The Developer & Advanced tab: technical details and settings that people rarely change.
 struct AdvancedSettingsView: View {
     @ObservedObject var serverController: ServerController
 
@@ -50,6 +50,81 @@ struct AdvancedSettingsView: View {
                 SectionTitle(title: "Developer", symbol: "hammer")
             }
 
+            MobileDetailsSection()
+
+            Section {
+                DisclosureGroup {
+                    Toggle(isOn: $tailscaleVPNEnabled) {
+                        RowLabel(title: "Allow Tailscale") {
+                            SettingsIcon(symbol: "lock.shield", color: .indigo)
+                        }
+                    }
+                    if tailscaleVPNEnabled {
+                        LabeledContent {
+                            TextField(
+                                "Tailscale host",
+                                text: $tailscaleHostOverride,
+                                prompt: Text(activeTailnetHost ?? "Automatic")
+                            )
+                            .labelsHidden()
+                            .multilineTextAlignment(.trailing)
+                        } label: {
+                            RowLabel(title: "Tailscale host") {
+                                SettingsIcon(symbol: "server.rack", color: .gray)
+                            }
+                        }
+                        LabeledContent {
+                            TextField("Port", value: $remotePort, format: .number.grouping(.never))
+                                .labelsHidden()
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        } label: {
+                            RowLabel(title: "Tailscale port") {
+                                SettingsIcon(symbol: "number", color: .gray)
+                            }
+                        }
+                    }
+                    Toggle(isOn: $cloudflareEnabled) {
+                        RowLabel(title: "Use my own Cloudflare address") {
+                            SettingsIcon(symbol: "cloud", color: .orange)
+                        }
+                    }
+                    if cloudflareEnabled {
+                        LabeledContent {
+                            TextField("wss://example.com/mobile", text: $cloudflareURL)
+                                .labelsHidden()
+                                .multilineTextAlignment(.trailing)
+                        } label: {
+                            RowLabel(title: "Cloudflare address") {
+                                SettingsIcon(symbol: "link", color: .orange)
+                            }
+                        }
+                        LabeledContent {
+                            TextField("Port", value: $cloudflareLocalPort, format: .number.grouping(.never))
+                                .labelsHidden()
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 80)
+                        } label: {
+                            RowLabel(title: "Local port") {
+                                SettingsIcon(symbol: "number", color: .gray)
+                            }
+                        }
+                    }
+                } label: {
+                    RowLabel(title: "Phone connection overrides") {
+                        SettingsIcon(symbol: "ipad.and.iphone", color: .blue)
+                    }
+                }
+            }
+            .onChange(of: tailscaleVPNEnabled) { _, _ in applyMobileSettings() }
+            .onChange(of: remotePort) { _, _ in applyMobileSettings() }
+            .onChange(of: cloudflareEnabled) { _, _ in applyMobileSettings() }
+            .onChange(of: cloudflareLocalPort) { _, _ in applyMobileSettings() }
+
+            if serverController.isRemoteAccessEnabled {
+                tailscaleSection
+            }
+
             Section {
                 if let storageError {
                     Label(storageError, systemImage: "exclamationmark.triangle")
@@ -72,56 +147,9 @@ struct AdvancedSettingsView: View {
             } header: {
                 SectionTitle(title: "Access tokens", symbol: "key")
             }
-
-            if serverController.isRemoteAccessEnabled {
-                tailscaleSection
-            }
-
-            Section {
-                DisclosureGroup("iPhone and iPad connection") {
-                    Toggle("Allow Tailscale", isOn: $tailscaleVPNEnabled)
-                    if tailscaleVPNEnabled {
-                        LabeledContent("Tailscale host") {
-                            TextField(
-                                "Tailscale host",
-                                text: $tailscaleHostOverride,
-                                prompt: Text(activeTailnetHost ?? "Automatic")
-                            )
-                            .labelsHidden()
-                            .multilineTextAlignment(.trailing)
-                        }
-                        LabeledContent("Tailscale port") {
-                            TextField("Port", value: $remotePort, format: .number.grouping(.never))
-                                .labelsHidden()
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
-                    }
-                    Toggle("Use my own Cloudflare address", isOn: $cloudflareEnabled)
-                    if cloudflareEnabled {
-                        LabeledContent("Cloudflare address") {
-                            TextField("wss://example.com/mobile", text: $cloudflareURL)
-                                .labelsHidden()
-                                .multilineTextAlignment(.trailing)
-                        }
-                        LabeledContent("Local port") {
-                            TextField("Port", value: $cloudflareLocalPort, format: .number.grouping(.never))
-                                .labelsHidden()
-                                .multilineTextAlignment(.trailing)
-                                .frame(width: 80)
-                        }
-                    }
-                }
-            } header: {
-                SectionTitle(title: "Overrides", symbol: "slider.horizontal.3")
-            }
-            .onChange(of: tailscaleVPNEnabled) { _, _ in applyMobileSettings() }
-            .onChange(of: remotePort) { _, _ in applyMobileSettings() }
-            .onChange(of: cloudflareEnabled) { _, _ in applyMobileSettings() }
-            .onChange(of: cloudflareLocalPort) { _, _ in applyMobileSettings() }
         }
         .formStyle(.grouped)
-        .navigationTitle("Advanced")
+        .navigationTitle("Developer & Advanced")
         .onAppear { hostnameDraft = serverController.remoteAccessHostname }
         .onChange(of: serverController.remoteAccessHostname) { _, name in hostnameDraft = name }
         .sheet(isPresented: $isEnteringAuthKey) {
@@ -186,7 +214,7 @@ struct AdvancedSettingsView: View {
 
     private var tailscaleSection: some View {
         Section {
-            LabeledContent("Device name") {
+            LabeledContent {
                 TextField(
                     "Device name",
                     text: $hostnameDraft,
@@ -195,8 +223,12 @@ struct AdvancedSettingsView: View {
                 .labelsHidden()
                 .multilineTextAlignment(.trailing)
                 .onSubmit { serverController.remoteAccessHostname = hostnameDraft }
+            } label: {
+                RowLabel(title: "Device name") {
+                    SettingsIcon(symbol: "desktopcomputer", color: .gray)
+                }
             }
-            LabeledContent("Port") {
+            LabeledContent {
                 TextField(
                     "Port",
                     value: Binding(
@@ -208,25 +240,24 @@ struct AdvancedSettingsView: View {
                 .labelsHidden()
                 .multilineTextAlignment(.trailing)
                 .frame(width: 80)
+            } label: {
+                RowLabel(title: "Port") {
+                    SettingsIcon(symbol: "number", color: .gray)
+                }
             }
             if case .running(let endpoint) = serverController.remoteAccessState {
-                LabeledContent("Private address") {
-                    HStack {
-                        Text(endpoint.url)
-                            .font(.caption.monospaced())
-                            .textSelection(.enabled)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Button("Copy") { copyToSettingsPasteboard(endpoint.url) }
+                LabeledContent {
+                    Button("Copy") { copyToSettingsPasteboard(endpoint.url) }
+                } label: {
+                    RowLabel(title: "Private address", subtitle: endpoint.url) {
+                        SettingsIcon(symbol: "link", color: .teal)
                     }
                 }
-                if let dnsName = endpoint.dnsName {
-                    LabeledContent("Name") {
-                        Text(dnsName).textSelection(.enabled)
-                    }
-                }
-                LabeledContent("IP address") {
+                LabeledContent {
                     VStack(alignment: .trailing) {
+                        if let dnsName = endpoint.dnsName {
+                            Text(dnsName)
+                        }
                         Text(endpoint.ipv4Address)
                         if let ipv6Address = endpoint.ipv6Address {
                             Text(ipv6Address)
@@ -234,10 +265,18 @@ struct AdvancedSettingsView: View {
                     }
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
+                } label: {
+                    RowLabel(title: "Name and IP address") {
+                        SettingsIcon(symbol: "network", color: .gray)
+                    }
                 }
             }
-            LabeledContent("Sign in without a browser") {
+            LabeledContent {
                 Button("Use an Auth Key…") { isEnteringAuthKey = true }
+            } label: {
+                RowLabel(title: "Sign in without a browser") {
+                    SettingsIcon(symbol: "key.fill", color: .gray)
+                }
             }
         } header: {
             SectionTitle(title: "Tailscale", symbol: "lock.shield")
@@ -267,6 +306,118 @@ struct AdvancedSettingsView: View {
             get: { item.wrappedValue != nil },
             set: { if !$0 { item.wrappedValue = nil } }
         )
+    }
+}
+
+/// What this Mac has sent to paired devices, and what it keeps for them: revisions, addresses, sync times.
+private struct MobileDetailsSection: View {
+    @State private var devices: [MobileDevice] = []
+    @State private var routes: [MobileConfigurationBuilder.Entry] = []
+    @State private var configurationRevision = 0
+    @State private var appliedRevisions: [String: Int] = [:]
+    @State private var syncedAt: [MobileDomain: Date] = [:]
+    @State private var isConfirmingDelete = false
+    @State private var error: String?
+
+    var body: some View {
+        Section {
+            LabeledContent {
+                Text(String(configurationRevision)).font(.callout.monospaced())
+            } label: {
+                RowLabel(title: "Configuration revision") {
+                    SettingsIcon(symbol: "number.circle.fill", color: .gray)
+                }
+            }
+            ForEach(devices) { device in
+                LabeledContent {
+                    Text(revisionText(for: device)).font(.callout.monospaced())
+                } label: {
+                    RowLabel(title: device.name) {
+                        SettingsIcon(
+                            symbol: device.name.localizedCaseInsensitiveContains("ipad") ? "ipad" : "iphone",
+                            color: .gray
+                        )
+                    }
+                }
+            }
+            ForEach(routes.filter { $0.address != nil }) { entry in
+                LabeledContent {
+                    Text(entry.address ?? "")
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } label: {
+                    RowLabel(title: entry.kind.settingsName) {
+                        SettingsIcon(symbol: entry.kind.settingsSymbol, color: .gray)
+                    }
+                }
+            }
+            ForEach(MobileDomain.allCases, id: \.self) { domain in
+                LabeledContent {
+                    Text(syncText(domain)).foregroundStyle(.secondary)
+                } label: {
+                    RowLabel(title: domain.label) {
+                        SettingsIcon(symbol: domain == .health ? "heart.fill" : "alarm.fill", color: .pink)
+                    }
+                }
+            }
+            LabeledContent {
+                Button("Delete…", role: .destructive) { isConfirmingDelete = true }
+            } label: {
+                RowLabel(title: "Cached phone data", subtitle: error) {
+                    SettingsIcon(symbol: "trash", color: .red)
+                }
+            }
+        } header: {
+            SectionTitle(title: "iPhone and iPad", symbol: "ipad.and.iphone")
+        }
+        .task {
+            while !Task.isCancelled {
+                await refresh()
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        .alert("Delete the cached data?", isPresented: $isConfirmingDelete) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task {
+                    do {
+                        try await MobileService.shared.deleteCache()
+                        error = nil
+                    } catch {
+                        self.error = error.localizedDescription
+                    }
+                    await refresh()
+                }
+            }
+        } message: {
+            Text("Paired devices send their data again the next time they connect.")
+        }
+    }
+
+    private func refresh() async {
+        let service = MobileService.shared
+        devices = await service.devices
+        routes = MobileConfigurationBuilder.entries(await service.currentState)
+        configurationRevision = await service.currentConfiguration.revision
+        for device in devices {
+            appliedRevisions[device.id] = await service.appliedConfigurationRevision(for: device.id)
+        }
+        for domain in MobileDomain.allCases {
+            syncedAt[domain] = await service.syncedAt(domain)
+        }
+    }
+
+    private func revisionText(for device: MobileDevice) -> String {
+        guard let applied = appliedRevisions[device.id] else { return "Not confirmed" }
+        return applied == configurationRevision ? String(applied) : "\(applied), Mac is on \(configurationRevision)"
+    }
+
+    private func syncText(_ domain: MobileDomain) -> String {
+        guard let date = syncedAt[domain] else { return "Never synced" }
+        let stale = MobileEnvelope.isStale(domain, syncedAt: date, now: Date())
+        return "\(date.formatted(.relative(presentation: .named)))\(stale ? ", stale" : "")"
     }
 }
 
