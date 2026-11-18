@@ -45,13 +45,12 @@ final class SettingsCatalogTests: XCTestCase {
         XCTAssertNil(KnownClient.match(name: "Some Other Tool"))
     }
 
-    func testStoreLogosExistForTheFourAppsAndClaudeCodeUsesASymbol() {
+    func testEachKnownAppHasItsLogo() {
         XCTAssertEqual(KnownClient.claudeDesktop.logoAsset, "ConnectorClaude")
         XCTAssertEqual(KnownClient.claudeDuet.logoAsset, "ConnectorClaudeDuet")
         XCTAssertEqual(KnownClient.muse.logoAsset, "ConnectorMuse")
         XCTAssertEqual(KnownClient.gemini.logoAsset, "ConnectorGemini")
-        XCTAssertNil(KnownClient.claudeCode.logoAsset)
-        XCTAssertEqual(KnownClient.claudeCode.symbol, "terminal")
+        XCTAssertEqual(KnownClient.claudeCode.logoAsset, "ConnectorClaudeCode")
     }
 
     func testEveryApprovalModeHasAShortCaption() {
