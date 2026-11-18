@@ -203,6 +203,10 @@ struct ConnectAppsScreen: View {
     /// The agents that connect over a public address, with how each adds a connector.
     private static let cloudAgents: [(id: String, name: String, logo: String, steps: (String) -> String)] = [
         (
+            "claudeWeb", "Claude Web", "ConnectorClaude",
+            { _ in "At claude.ai, open Settings, then Connectors, add a custom connector and paste the URL." }
+        ),
+        (
             "claudeDuet", "Claude Duet", "ConnectorClaudeDuet",
             { _ in "Add a custom MCP connector, paste the URL, then approve once in iMCP." }
         ),
@@ -224,7 +228,8 @@ struct ConnectAppsScreen: View {
         VStack(spacing: OnboardingSpacing.large) {
             ScreenTitle(
                 title: "Connect your AI agent",
-                subtitle: "Add iMCP to Claude on this Mac, or copy your connector URL for Claude Duet, Muse and Gemini."
+                subtitle:
+                    "Add iMCP to Claude on this Mac, or copy your connector URL for Claude Web, Claude Duet, Muse and Gemini."
             )
 
             VStack(spacing: 0) {
@@ -362,7 +367,7 @@ struct RemoteAccessScreen: View {
                 choiceRow(
                     .funnel,
                     title: "Tailscale public address",
-                    detail: "A public https address for cloud AI apps such as claude.ai, through Tailscale."
+                    detail: "A public https address for cloud AI apps such as Claude Web, through Tailscale."
                 )
                 Divider().padding(.horizontal, OnboardingSpacing.medium)
                 choiceRow(
