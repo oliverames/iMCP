@@ -125,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         shouldCheckOnboarding = true
+        DockPresence.shared.start()
         #if DEBUG
             // Live check of the private Reminders tools; see App/Debug/RemindersPrivateSelfTest.swift.
             if ProcessInfo.processInfo.arguments.contains("--reminders-private-selftest") {
@@ -147,5 +148,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Reopening the app must work even when the menu bar item is absent.
         shouldOpenSettings = true
         return false
+    }
+}
+
+/// Shows iMCP in the Dock, with its menu bar, while a Settings, Setup Assistant or other titled window is open,
+/// and goes back to the menu bar alone when the last one closes.
+///
+/// The menu bar panel and alerts are not titled windows, so they never put the app in the Dock.
+@MainActor
+final class DockPresence {
+    static let shared = DockPresence()
+
+    private var observers: [any NSObjectProtocol] = []
+
+    func start() {
+        guard observers.isEmpty else { return }
+        let names: [Notification.Name] = [
+            NSWindow.didBecomeKeyNotification,
+            NSWindow.didMiniaturizeNotification,
+            NSWindow.didDeminiaturizeNotification,
+            NSWindow.willCloseNotification,
+        ]
+        for name in names {
+            observers.append(
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                    let closing = note.name == NSWindow.willCloseNotification ? note.object as? NSWindow : nil
+                    MainActor.assumeIsolated { self?.update(excluding: closing) }
+                }
+            )
+        }
+    }
+
+    /// Whether a window that people use is open. A minimized window still counts, so it stays reachable.
+    private func hasAppWindow(excluding closing: NSWindow?) -> Bool {
+        NSApp.windows.contains { window in
+            window !== closing
+                && window.styleMask.contains(.titled)
+                && !(window is NSPanel)
+                && (window.isVisible || window.isMiniaturized)
+        }
+    }
+
+    private func update(excluding closing: NSWindow?) {
+        let wantsDock = hasAppWindow(excluding: closing)
+        let current = NSApp.activationPolicy()
+        if wantsDock, current != .regular {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        } else if !wantsDock, current != .accessory {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 }

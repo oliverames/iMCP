@@ -27,7 +27,7 @@ enum OnboardingCopy {
         Benefit(
             symbol: "switch.2",
             title: "You choose each service",
-            detail: "Calendar, Mail, Notes and the rest stay off until you turn them on."
+            detail: "You pick the services AI apps can use, and macOS asks permission as each one turns on."
         ),
         Benefit(
             symbol: "app.connected.to.app.below.fill",
@@ -198,16 +198,21 @@ struct ServicesScreen: View {
 struct ConnectAppsScreen: View {
     @ObservedObject var model: OnboardingModel
 
+    private static let logoSize: CGFloat = 32
+
     /// The agents that connect over a public address, with how each adds a connector.
-    private static let cloudAgents: [(id: String, name: String, symbol: String, steps: (String) -> String)] = [
+    private static let cloudAgents: [(id: String, name: String, logo: String, steps: (String) -> String)] = [
         (
-            "claudeDuet", "Claude Duet", "person.2",
+            "claudeDuet", "Claude Duet", "ConnectorClaudeDuet",
             { _ in "Add a custom MCP connector, paste the URL, then approve once in iMCP." }
         ),
-        ("muse", "Muse", "sparkles", { _ in "Add an MCP server with the URL. It signs in with OAuth 2.1." }),
         (
-            "gemini", "Gemini", "diamond",
-            { url in "In Gemini CLI, run: gemini mcp add --transport http imcp \(url)" }
+            "muse", "Muse", "ConnectorMuse",
+            { _ in "Add an MCP server with the URL. It signs in with OAuth 2.1." }
+        ),
+        (
+            "gemini", "Gemini", "ConnectorGemini",
+            { _ in "Add a custom MCP connector, paste the URL, then approve once in iMCP." }
         ),
     ]
 
@@ -224,7 +229,7 @@ struct ConnectAppsScreen: View {
 
             VStack(spacing: 0) {
                 appRow(
-                    symbol: "macwindow",
+                    logo: "ConnectorClaude",
                     name: "Claude Desktop",
                     detail: nil,
                     isSetUp: ClaudeDesktop.isConfigured,
@@ -245,7 +250,7 @@ struct ConnectAppsScreen: View {
                 ForEach(Self.cloudAgents, id: \.id) { agent in
                     Divider().padding(.horizontal, OnboardingSpacing.medium)
                     appRow(
-                        symbol: agent.symbol,
+                        logo: agent.logo,
                         name: agent.name,
                         detail: publicURL.map(agent.steps)
                             ?? "Needs a public address. Choose one in the previous step.",
@@ -258,7 +263,6 @@ struct ConnectAppsScreen: View {
                 }
             }
             .frame(maxWidth: OnboardingSpacing.column)
-            .modifier(OnboardingCardBackground())
 
             Caption("The first time an app connects, iMCP asks once: Allow Once or Always Allow.")
         }
@@ -266,7 +270,8 @@ struct ConnectAppsScreen: View {
 
     /// `isSetUp` is nil for an agent that connects from its own side, so there is nothing to check here.
     private func appRow(
-        symbol: String,
+        symbol: String? = nil,
+        logo: String? = nil,
         name: String,
         detail: String?,
         isSetUp: Bool?,
@@ -276,11 +281,23 @@ struct ConnectAppsScreen: View {
         isEnabled: Bool = true
     ) -> some View {
         HStack(spacing: OnboardingSpacing.medium) {
-            Image(systemName: symbol)
-                .font(.title2)
-                .foregroundStyle(.tint)
-                .frame(width: 32)
-                .accessibilityHidden(true)
+            Group {
+                if let logo {
+                    Image(logo)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: Self.logoSize, height: Self.logoSize)
+                        // The App Store artwork is a full square. Apple's app icon shape has a corner
+                        // radius of 22.37 percent of its width, with continuous corners.
+                        .clipShape(RoundedRectangle(cornerRadius: Self.logoSize * 0.2237, style: .continuous))
+                } else if let symbol {
+                    Image(systemName: symbol)
+                        .font(.title2)
+                        .foregroundStyle(.tint)
+                        .frame(width: 32, height: 32)
+                }
+            }
+            .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: OnboardingSpacing.tight) {
                 Text(name).font(.headline)
                 if let detail {
@@ -354,7 +371,6 @@ struct RemoteAccessScreen: View {
                 if model.remoteSelection == .cloudflare { cloudflareChecklist }
             }
             .frame(maxWidth: OnboardingSpacing.column)
-            .modifier(OnboardingCardBackground())
 
             Caption("You can change this any time in Settings. Skipping keeps Local only.")
         }
@@ -609,7 +625,6 @@ struct IPhoneScreen: View {
             }
             .padding(OnboardingSpacing.medium)
             .frame(maxWidth: OnboardingSpacing.column)
-            .modifier(OnboardingCardBackground())
 
             Caption("This step moves on by itself when a device pairs. Skip it if you do not use an iPhone.")
         }
@@ -662,7 +677,6 @@ struct DoneScreen: View {
             }
             .padding(OnboardingSpacing.medium)
             .frame(maxWidth: OnboardingSpacing.column, alignment: .leading)
-            .modifier(OnboardingCardBackground())
 
             Caption(
                 "Settings has the approval mode, which decides when iMCP asks before an action runs. Right now: \(serverController.approvalMode.title)."
