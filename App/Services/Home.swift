@@ -613,7 +613,9 @@ actor HomeService: Service, HomeBackend {
             embedded: HomeHelperLocator.embeddedLocations(in: Bundle.main.bundleURL),
             installed: HomeHelperLocator.installLocations,
             registered: NSWorkspace.shared.urlForApplication(
-                withBundleIdentifier: HomeHelperLocator.defaultBundleIdentifier
+                withBundleIdentifier: HomeHelperLocator.helperBundleIdentifier(
+                    appBundleIdentifier: Bundle.main.bundleIdentifier
+                )
             ),
             isHelper: HomeHelperLocator.isHelper(at:)
         )
