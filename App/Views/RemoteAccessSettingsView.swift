@@ -123,9 +123,23 @@ struct RemoteAccessSettingsView: View {
                 if choice == .funnel, endpoint.funnelCapabilityGranted == false {
                     FunnelACLGuidanceView(ipv4Address: endpoint.ipv4Address)
                 }
-                Button("Log Out of Tailscale…", role: .destructive) { isConfirmingTailscaleLogOut = true }
+                Button {
+                    isConfirmingTailscaleLogOut = true
+                } label: {
+                    RowLabel(title: "Log out of Tailscale…") {
+                        SettingsIcon(symbol: "rectangle.portrait.and.arrow.right", color: .red)
+                    }
+                }
+                .buttonStyle(.plain)
             } else if case .needsApproval = serverController.remoteAccessState {
-                Button("Log Out of Tailscale…", role: .destructive) { isConfirmingTailscaleLogOut = true }
+                Button {
+                    isConfirmingTailscaleLogOut = true
+                } label: {
+                    RowLabel(title: "Log out of Tailscale…") {
+                        SettingsIcon(symbol: "rectangle.portrait.and.arrow.right", color: .red)
+                    }
+                }
+                .buttonStyle(.plain)
             }
         } header: {
             Text(choice.summaryName)
@@ -146,15 +160,27 @@ struct RemoteAccessSettingsView: View {
                         Task { await cloudflare.provisionAndConnect() }
                     }
                 }
-                HStack {
-                    Button("Refresh Domains") { Task { await cloudflare.refreshZones() } }
-                    Spacer()
-                    Button("Log Out…", role: .destructive) { isConfirmingCloudflareLogOut = true }
+                Button {
+                    Task { await cloudflare.refreshZones() }
+                } label: {
+                    RowLabel(title: "Refresh domains") { SettingsIcon(symbol: "arrow.clockwise", color: .gray) }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                Button {
+                    isConfirmingCloudflareLogOut = true
+                } label: {
+                    RowLabel(title: "Log out of Cloudflare…") {
+                        SettingsIcon(symbol: "rectangle.portrait.and.arrow.right", color: .red)
+                    }
+                }
+                .buttonStyle(.plain)
             }
         } header: {
             Text("Cloudflare Tunnel")
+        } footer: {
+            Text(
+                "iMCP creates one tunnel and one address on your domain, and nothing else. Turning it off deletes both."
+            )
         }
     }
 

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// The Developer & Advanced tab: technical details and settings that people rarely change.
+/// The Advanced tab: technical details and settings that people rarely change.
 struct AdvancedSettingsView: View {
     @ObservedObject var serverController: ServerController
 
@@ -150,7 +150,7 @@ struct AdvancedSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle("Developer & Advanced")
+        .navigationTitle("Advanced")
         .onAppear { hostnameDraft = serverController.remoteAccessHostname }
         .onChange(of: serverController.remoteAccessHostname) { _, name in hostnameDraft = name }
         .sheet(isPresented: $isEnteringAuthKey) {
