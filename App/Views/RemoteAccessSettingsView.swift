@@ -9,7 +9,6 @@ struct RemoteAccessSettingsView: View {
     /// The Setup Assistant's model, which holds the chosen way and its live checklist state.
     @StateObject private var remote: OnboardingModel
 
-    @State private var isShowingCredentialSheet = false
     @State private var isConfirmingTailscaleLogOut = false
     @State private var isConfirmingCloudflareLogOut = false
 
@@ -87,9 +86,6 @@ struct RemoteAccessSettingsView: View {
             cloudflare.refreshEnvironment()
         }
         .onDisappear { remote.windowWillClose() }
-        .sheet(isPresented: $isShowingCredentialSheet) {
-            CloudflareCredentialSheet(cloudflare: cloudflare)
-        }
         .alert("Log out of Tailscale?", isPresented: $isConfirmingTailscaleLogOut) {
             Button("Log Out", role: .destructive) {
                 serverController.logOutOfRemoteAccess()
@@ -152,13 +148,16 @@ struct RemoteAccessSettingsView: View {
         Section {
             CloudflareChecklistView(cloudflare: cloudflare, compact: true)
 
-            if cloudflare.account == nil {
-                Button("Use an API Token…") { isShowingCredentialSheet = true }
-            } else {
+            if cloudflare.account != nil {
                 if case .connected = cloudflare.state, isHostnameDirty {
-                    Button("Update and Reconnect") {
+                    Button {
                         Task { await cloudflare.provisionAndConnect() }
+                    } label: {
+                        RowLabel(title: "Update and reconnect") {
+                            SettingsIcon(symbol: "arrow.triangle.2.circlepath", color: .blue)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
                 Button {
                     Task { await cloudflare.refreshZones() }
@@ -227,62 +226,5 @@ private struct FunnelACLGuidanceView: View {
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-private struct CloudflareCredentialSheet: View {
-    @ObservedObject var cloudflare: CloudflareTunnelController
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var input = ""
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Sign In to Cloudflare")
-                .font(.headline)
-            Text(
-                "Paste a Cloudflare API token (with Zone:Read, DNS:Edit, and Cloudflare Tunnel:Edit permissions) or paste the contents of `cert.pem`."
-            )
-            .fixedSize(horizontal: false, vertical: true)
-
-            TextEditor(text: $input)
-                .font(.body.monospaced())
-                .frame(height: 110)
-                .padding(4)
-                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
-
-            HStack {
-                Button("Import cert.pem…") {
-                    chooseCertFile()
-                }
-                Spacer()
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                Button("Continue") {
-                    let value = input
-                    dismiss()
-                    Task { await cloudflare.logIn(credentialInput: value) }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(20)
-        .frame(width: 500)
-    }
-
-    private func chooseCertFile() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.showsHiddenFiles = true
-        panel.message = "Select your Cloudflare cert.pem file (for example ~/.cloudflared/cert.pem)."
-        if panel.runModal() == .OK, let url = panel.url {
-            dismiss()
-            Task { await cloudflare.importCertPEM(from: url) }
-        }
     }
 }

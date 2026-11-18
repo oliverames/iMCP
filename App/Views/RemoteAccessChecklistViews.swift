@@ -23,6 +23,21 @@ extension RemoteChoice {
 
 // MARK: - Checklists
 
+/// The container of a checklist. In Settings each line is its own row of the form, with its own separator
+/// and height, like every other row. In the Setup Assistant the lines stack in one column.
+private struct ChecklistStack<Content: View>: View {
+    let compact: Bool
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if compact {
+            Group { content() }
+        } else {
+            VStack(alignment: .leading, spacing: 10) { content() }
+        }
+    }
+}
+
 /// The Tailscale lines of the checklist, with the live state beside each.
 /// The Setup Assistant and the Remote Access tab in Settings both show it.
 struct TailscaleChecklistView: View {
@@ -38,7 +53,7 @@ struct TailscaleChecklistView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        ChecklistStack(compact: compact) {
             if compact {
                 CompactChecklist(
                     items: TailscaleChecklist.items(inputs),
@@ -87,7 +102,7 @@ struct CloudflareChecklistView: View {
                     .checklistButton(compact: compact)
                 }
             }
-            CloudflareTokenEntry(cloudflare: cloudflare)
+            CloudflareTokenEntry(cloudflare: cloudflare, compact: compact)
         }
         .padding(.leading, 28)
     }
@@ -102,7 +117,7 @@ struct CloudflareChecklistView: View {
         )
         let items = CloudflareChecklist.items(inputs)
 
-        VStack(alignment: .leading, spacing: 10) {
+        ChecklistStack(compact: compact) {
             if compact {
                 CompactChecklist(
                     items: items,
@@ -338,16 +353,24 @@ private struct StepRow: View {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if case .needsAction(let link) = item.status, let link {
-                    Button("Open") { openLink(link) }
+                    Button(linkTitle) { openLink(link) }
                         .buttonStyle(.link)
                         .font(.caption)
                 }
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var linkTitle: String {
+        switch item.kind {
+        case .cloudflareAccount, .domain, .signIn, .hostname: "Open Cloudflare"
+        default: "Open Tailscale"
+        }
     }
 
     private var tint: Color {
