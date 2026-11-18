@@ -6,8 +6,8 @@ import SwiftUI
 ///
 /// It is a window-style `MenuBarExtra`, not an `NSMenu`, because a menu closes after every click
 /// and the service rows must stay open while people turn several on or off.
-/// Spacing follows a native menu: 22 pt rows, 4 pt around separators, and the system's
-/// selected-menu-item colors for the hover highlight. The items come from ``MenuStructure``.
+/// Spacing follows a native menu: 22 pt rows, 4 pt around separators, and the system accent color
+/// for the hover highlight, as a native menu draws it. The items come from ``MenuStructure``.
 struct ContentView: View {
     @ObservedObject var serverController: ServerController
     @Binding var isEnabled: Bool
@@ -363,7 +363,7 @@ private struct MenuRowButtonStyle: ButtonStyle {
             )
             .background(
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(isHighlighted ? Color(nsColor: .selectedContentBackgroundColor) : .clear)
+                    .fill(isHighlighted ? Color(nsColor: .controlAccentColor) : .clear)
             )
             .onHover { isHovering = $0 }
     }

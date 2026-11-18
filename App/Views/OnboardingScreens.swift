@@ -332,9 +332,15 @@ struct RemoteAccessScreen: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var serverController: ServerController
     @ObservedObject var cloudflare: CloudflareTunnelController
+    /// False picks the way to reach this Mac; true sets up the one that was picked.
+    var isSetup = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        if isSetup { setupBody } else { chooseBody }
+    }
+
+    private var chooseBody: some View {
         VStack(spacing: OnboardingSpacing.large) {
             ScreenTitle(
                 title: "How should AI apps reach your Mac?",
@@ -353,14 +359,12 @@ struct RemoteAccessScreen: View {
                     title: "Tailscale",
                     detail: "Private access from your own devices anywhere. Needs a free Tailscale account."
                 )
-                if model.remoteSelection == .tailscale { checklist(TailscaleChecklist.items(model.tailscaleInputs)) }
                 Divider().padding(.horizontal, OnboardingSpacing.medium)
                 choiceRow(
                     .funnel,
                     title: "Tailscale public address",
                     detail: "A public https address for cloud AI apps such as claude.ai, through Tailscale."
                 )
-                if model.remoteSelection == .funnel { checklist(TailscaleChecklist.items(model.tailscaleInputs)) }
                 Divider().padding(.horizontal, OnboardingSpacing.medium)
                 choiceRow(
                     .cloudflare,
@@ -368,10 +372,38 @@ struct RemoteAccessScreen: View {
                     detail:
                         "A public https address on your own domain. Needs a domain that is already on your Cloudflare account."
                 )
-                if model.remoteSelection == .cloudflare { cloudflareChecklist }
             }
             .frame(maxWidth: OnboardingSpacing.column)
 
+            Caption("You can change this any time in Settings. Skipping keeps Local only.")
+        }
+    }
+
+    /// The second screen: what the picked way needs, and the action that sets it up.
+    private var setupBody: some View {
+        VStack(spacing: OnboardingSpacing.large) {
+            switch model.remoteSelection {
+            case .local:
+                ScreenTitle(title: "Nothing to set up", subtitle: "Local only needs nothing.")
+            case .tailscale:
+                ScreenTitle(
+                    title: "Sign in to Tailscale",
+                    subtitle: "iMCP joins your Tailscale network and checks what it needs."
+                )
+                checklist(TailscaleChecklist.items(model.tailscaleInputs))
+            case .funnel:
+                ScreenTitle(
+                    title: "Turn on your public address",
+                    subtitle: "iMCP checks what Tailscale needs. You approve once on Tailscale's page if it asks."
+                )
+                checklist(TailscaleChecklist.items(model.tailscaleInputs))
+            case .cloudflare:
+                ScreenTitle(
+                    title: "Set up Cloudflare Tunnel",
+                    subtitle: "You need a domain that is already on your Cloudflare account."
+                )
+                cloudflareChecklist
+            }
             Caption("You can change this any time in Settings. Skipping keeps Local only.")
         }
     }
@@ -425,10 +457,7 @@ struct RemoteAccessScreen: View {
                     .onboardingSecondary()
             }
         }
-        .padding(.horizontal, OnboardingSpacing.medium)
-        .padding(.leading, 32 + OnboardingSpacing.medium)
-        .padding(.bottom, OnboardingSpacing.medium)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: OnboardingSpacing.column, alignment: .leading)
     }
 
     private var cloudflareChecklist: some View {
@@ -497,10 +526,7 @@ struct RemoteAccessScreen: View {
             .disabled(!CloudflareChecklist.isReady(items) || cloudflare.state.activeURL != nil)
             .accessibilityIdentifier("onboarding.cloudflare.setUp")
         }
-        .padding(.horizontal, OnboardingSpacing.medium)
-        .padding(.leading, 32 + OnboardingSpacing.medium)
-        .padding(.bottom, OnboardingSpacing.medium)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: OnboardingSpacing.column, alignment: .leading)
     }
 
     private func title(for kind: ChecklistItem.Kind) -> String {
