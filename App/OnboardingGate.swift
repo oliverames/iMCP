@@ -26,7 +26,7 @@ enum OnboardingGate {
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let shared = OnboardingWindowController()
 
-    private var hostingView: NSHostingView<AnyView>?
+    private var hostingController: NSHostingController<AnyView>?
     private var onSeen: (() -> Void)?
 
     convenience init() {
@@ -38,9 +38,20 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         let markSeen = {
             UserDefaults.standard.set(true, forKey: OnboardingGate.seenDefaultsKey)
         }
+        var initialStep = OnboardingWizardView.Step.services
+        #if DEBUG
+            // `--onboarding-step=N` opens step N (0 to 4), for screenshots.
+            if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--onboarding-step=") }),
+                let value = Int(argument.dropFirst("--onboarding-step=".count)),
+                let step = OnboardingWizardView.Step(rawValue: value)
+            {
+                initialStep = step
+            }
+        #endif
         let view = OnboardingWizardView(
             serverController: serverController,
             isEnabled: isEnabled,
+            initialStep: initialStep,
             onFinish: { [weak self] in
                 markSeen()
                 self?.close()
@@ -54,28 +65,32 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         self.onSeen = onSeen
         let rootView = AnyView(content)
 
-        if let hostingView {
-            hostingView.rootView = rootView
+        if let hostingController {
+            hostingController.rootView = rootView
         } else {
-            let hostingView = NSHostingView(rootView: rootView)
-            self.hostingView = hostingView
-
-            let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 660, height: 590),
-                styleMask: [.titled, .closable],
-                backing: .buffered,
-                defer: false
-            )
-            window.title = "Set Up iMCP"
-            window.contentView = hostingView
-            window.isReleasedWhenClosed = false
+            let window = Self.makeWindow(rootView: rootView)
             window.delegate = self
+            self.hostingController = window.contentViewController as? NSHostingController<AnyView>
             window.center()
             self.window = window
         }
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// A titled, resizable window around `rootView`, at the size the assistant opens with.
+    static func makeWindow(rootView: AnyView) -> NSWindow {
+        let controller = NSHostingController(rootView: rootView)
+        // The form is long, so keep the window from growing to fit all of it.
+        controller.sizingOptions = [.minSize]
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable, .resizable]
+        window.isReleasedWhenClosed = false
+        window.title = "Set Up iMCP"
+        window.contentMinSize = NSSize(width: 720, height: 480)
+        window.setContentSize(NSSize(width: 880, height: 560))
+        return window
     }
 
     func windowWillClose(_ notification: Notification) {
