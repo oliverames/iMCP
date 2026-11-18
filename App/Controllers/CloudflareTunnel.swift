@@ -863,6 +863,7 @@ final class CloudflareTunnelController: ObservableObject {
         static let zoneID = "cloudflareTunnelZoneID"
         static let tunnelID = "cloudflareTunnelID"
         static let tunnelName = "cloudflareTunnelName"
+        static let signedInWithToken = "cloudflareSignedInWithToken"
     }
 
     @Published private(set) var state: State = .off
@@ -875,6 +876,8 @@ final class CloudflareTunnelController: ObservableObject {
         }
     }
     @Published var hostnameDraft: String = ""
+    /// Whether the saved account came from a pasted API token, so the screen can offer to remove it.
+    @Published private(set) var isSignedInWithToken = false
     @Published private(set) var detectedCertURL: URL?
     @Published private(set) var isBinaryAvailable: Bool
 
@@ -950,6 +953,7 @@ final class CloudflareTunnelController: ObservableObject {
         self.hostnameDraft = savedHostname
         self.isBinaryAvailable = processRunner.findBinary() != nil
 
+        self.isSignedInWithToken = defaults.bool(forKey: DefaultsKey.signedInWithToken)
         restoreInitialState()
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -1133,6 +1137,34 @@ final class CloudflareTunnelController: ObservableObject {
         }
     }
 
+    /// Asks Cloudflare whether a pasted API token works. The token is only sent to Cloudflare.
+    ///
+    /// The verify call is for tokens that belong to a user. A token that belongs to an account is not
+    /// known there, so a refusal is checked against the zone list before it counts as a failure.
+    func checkAPIToken(_ token: String) async -> CloudflareTokenVerification {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .rejected(CloudflareError.missingToken.localizedDescription) }
+        let client = CloudflareAPIClient(apiToken: trimmed, transport: httpTransport)
+        do {
+            let verdict = try await client.verifyToken()
+            if case .rejected = verdict, (try? await client.listZones()) != nil {
+                return .valid(expiresOn: nil)
+            }
+            return verdict
+        } catch {
+            return .rejected("iMCP could not reach Cloudflare: \(error.localizedDescription)")
+        }
+    }
+
+    /// Signs in with a pasted API token through the same path as any other credential.
+    func signIn(withAPIToken token: String) async {
+        await logIn(credentialInput: token)
+        if account != nil {
+            defaults.set(true, forKey: DefaultsKey.signedInWithToken)
+            isSignedInWithToken = true
+        }
+    }
+
     func refreshZones() async {
         guard let account else {
             zones = []
@@ -1170,6 +1202,8 @@ final class CloudflareTunnelController: ObservableObject {
         defaults.removeObject(forKey: DefaultsKey.zoneID)
         defaults.removeObject(forKey: DefaultsKey.tunnelID)
         defaults.removeObject(forKey: DefaultsKey.tunnelName)
+        defaults.removeObject(forKey: DefaultsKey.signedInWithToken)
+        isSignedInWithToken = false
         account = nil
         zones = []
         selectedZoneID = ""

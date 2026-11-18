@@ -334,6 +334,7 @@ struct RemoteAccessScreen: View {
     @ObservedObject var cloudflare: CloudflareTunnelController
     /// False picks the way to reach this Mac; true sets up the one that was picked.
     var isSetup = false
+    @StateObject private var tailscaleAccess = TailscaleAccessController()
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -397,6 +398,7 @@ struct RemoteAccessScreen: View {
                     subtitle: "iMCP checks what Tailscale needs. You approve once on Tailscale's page if it asks."
                 )
                 checklist(TailscaleChecklist.items(model.tailscaleInputs))
+                tailscaleAutoEnable
             case .cloudflare:
                 ScreenTitle(
                     title: "Set up Cloudflare Tunnel",
@@ -460,6 +462,19 @@ struct RemoteAccessScreen: View {
         .frame(maxWidth: OnboardingSpacing.column, alignment: .leading)
     }
 
+    /// The quiet link under the public address checklist, once this Mac is on the tailnet
+    /// and Tailscale has not said that public addresses are allowed.
+    @ViewBuilder
+    private var tailscaleAutoEnable: some View {
+        if case .running(let endpoint) = serverController.remoteAccessState, endpoint.funnelCapabilityGranted != true {
+            TailscaleAutoEnable(access: tailscaleAccess, target: endpoint.ipv4Address)
+                .frame(maxWidth: OnboardingSpacing.column, alignment: .leading)
+                .onChange(of: tailscaleAccess.phase) {
+                    if tailscaleAccess.phase == .done { serverController.refreshRemoteMobileConfiguration() }
+                }
+        }
+    }
+
     private var cloudflareChecklist: some View {
         let domains = cloudflare.zones.map(\.name)
         let inputs = CloudflareChecklist.Inputs(
@@ -489,6 +504,10 @@ struct RemoteAccessScreen: View {
                         }
                     }
                     .padding(.leading, 28)
+                }
+                if item.kind == .signIn {
+                    CloudflareTokenEntry(cloudflare: cloudflare)
+                        .padding(.leading, 28)
                 }
                 if item.kind == .domain, cloudflare.zones.count > 1 {
                     Picker("Domain", selection: $cloudflare.selectedZoneID) {

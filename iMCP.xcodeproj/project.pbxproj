@@ -157,6 +157,10 @@
 		B13500000000000000000041 /* ../../App/Services/NotesOrganize.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13500000000000000000031 /* ../../App/Services/NotesOrganize.swift */; };
 		B13500000000000000000042 /* ../../App/Services/NotesExport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13500000000000000000032 /* ../../App/Services/NotesExport.swift */; };
 		B13500000000000000000043 /* ../../App/Services/NotesOrganizeTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13500000000000000000033 /* ../../App/Services/NotesOrganizeTools.swift */; };
+		B16000000000000000000002 /* ../../App/Controllers/CloudflareTokenCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16000000000000000000001 /* ../../App/Controllers/CloudflareTokenCheck.swift */; };
+		B16000000000000000000004 /* ../../App/Controllers/TailscalePolicyAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16000000000000000000003 /* ../../App/Controllers/TailscalePolicyAccess.swift */; };
+		B16000000000000000000006 /* CloudflareTokenCheckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16000000000000000000005 /* CloudflareTokenCheckTests.swift */; };
+		B16000000000000000000008 /* TailscalePolicyAccessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B16000000000000000000007 /* TailscalePolicyAccessTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -322,6 +326,10 @@
 		B13500000000000000000031 /* ../../App/Services/NotesOrganize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Services/NotesOrganize.swift; sourceTree = "<group>"; };
 		B13500000000000000000032 /* ../../App/Services/NotesExport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Services/NotesExport.swift; sourceTree = "<group>"; };
 		B13500000000000000000033 /* ../../App/Services/NotesOrganizeTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Services/NotesOrganizeTools.swift; sourceTree = "<group>"; };
+		B16000000000000000000001 /* ../../App/Controllers/CloudflareTokenCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Controllers/CloudflareTokenCheck.swift; sourceTree = "<group>"; };
+		B16000000000000000000003 /* ../../App/Controllers/TailscalePolicyAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Controllers/TailscalePolicyAccess.swift; sourceTree = "<group>"; };
+		B16000000000000000000005 /* CloudflareTokenCheckTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudflareTokenCheckTests.swift; sourceTree = "<group>"; };
+		B16000000000000000000007 /* TailscalePolicyAccessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TailscalePolicyAccessTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -578,6 +586,10 @@
 				B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */,
 				B15000000000000000000013 /* OnboardingFlowTests.swift */,
 				B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */,
+				B16000000000000000000007 /* TailscalePolicyAccessTests.swift */,
+				B16000000000000000000005 /* CloudflareTokenCheckTests.swift */,
+				B16000000000000000000003 /* ../../App/Controllers/TailscalePolicyAccess.swift */,
+				B16000000000000000000001 /* ../../App/Controllers/CloudflareTokenCheck.swift */,
 				B15000000000000000000023 /* RemoteAccessChecklistTests.swift */,
 				B13800000000000000000020 /* ../../Shared/Models/ApprovalMode.swift */,
 				B14000000000000000000010 /* CalendarSelectionTests.swift */,
@@ -1053,6 +1065,10 @@
 				B15000000000000000000012 /* ../../App/Models/OnboardingFlow.swift in Sources */,
 				B15000000000000000000014 /* OnboardingFlowTests.swift in Sources */,
 				B15000000000000000000022 /* ../../App/Models/RemoteAccessChecklist.swift in Sources */,
+				B16000000000000000000008 /* TailscalePolicyAccessTests.swift in Sources */,
+				B16000000000000000000006 /* CloudflareTokenCheckTests.swift in Sources */,
+				B16000000000000000000004 /* ../../App/Controllers/TailscalePolicyAccess.swift in Sources */,
+				B16000000000000000000002 /* ../../App/Controllers/CloudflareTokenCheck.swift in Sources */,
 				B15000000000000000000024 /* RemoteAccessChecklistTests.swift in Sources */,
 				B13800000000000000000021 /* ../../Shared/Models/ApprovalMode.swift in Sources */,
 				B14000000000000000000020 /* CalendarSelectionTests.swift in Sources */,
