@@ -667,6 +667,11 @@ struct DoneScreen: View {
             Caption(
                 "Settings has the approval mode, which decides when iMCP asks before an action runs. Right now: \(serverController.approvalMode.title)."
             )
+
+            Button("Go Through Setup Again") { model.reset(mode: .firstRun) }
+                .buttonStyle(.link)
+                .font(.callout)
+                .accessibilityIdentifier("onboarding.restart")
         }
     }
 

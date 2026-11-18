@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import Sparkle
 import SwiftUI
 
@@ -202,6 +203,7 @@ enum MenuMetrics {
 /// Resizes the `MenuBarExtra` panel that shows ``ContentView`` to fit its content.
 @MainActor
 final class MenuPanelController {
+    private let log = Logger(subsystem: "com.amesconsulting.imcp.mac", category: "menu.panel")
     var contentWidth: CGFloat = 0
     var contentHeight: CGFloat = 0
 
@@ -237,11 +239,18 @@ final class MenuPanelController {
     func resizeToFitContent() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window, self.contentHeight > 0, self.contentWidth > 0 else {
+                self?.log.notice(
+                    "resize skipped: window \(self?.window != nil, privacy: .public) content \(self?.contentWidth ?? 0, privacy: .public)x\(self?.contentHeight ?? 0, privacy: .public)"
+                )
                 return
             }
             let frame = window.frame
             guard abs(frame.height - self.contentHeight) > 0.5 || abs(frame.width - self.contentWidth) > 0.5
-            else { return }
+            else {
+                self.describe("already fits \(self.contentWidth)x\(self.contentHeight)", window)
+                return
+            }
+            self.describe("before resize to \(self.contentWidth)x\(self.contentHeight)", window)
             var x = frame.midX - self.contentWidth / 2
             if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
                 x = min(max(x, visible.minX + 4), visible.maxX - self.contentWidth - 4)
@@ -255,7 +264,28 @@ final class MenuPanelController {
                 ),
                 display: true
             )
+            self.describe("after resize", window)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self, weak window] in
+                guard let self, let window else { return }
+                self.describe("0.3s later", window)
+            }
         }
+    }
+
+    private func describe(_ event: String, _ window: NSWindow) {
+        let content = window.contentView
+        log.notice(
+            """
+            \(event, privacy: .public): window \(NSStringFromRect(window.frame), privacy: .public), \
+            contentView \(NSStringFromRect(content?.frame ?? .zero), privacy: .public), \
+            contentLayoutRect \(NSStringFromRect(window.contentLayoutRect), privacy: .public), \
+            safeArea \(String(describing: content?.safeAreaInsets), privacy: .public), \
+            style \(window.styleMask.rawValue, privacy: .public), \
+            class \(String(describing: type(of: window)), privacy: .public), \
+            contentClass \(String(describing: content.map { type(of: $0) }), privacy: .public), \
+            subviews \(content?.subviews.map { NSStringFromRect($0.frame) }.joined(separator: " | ") ?? "", privacy: .public)
+            """
+        )
     }
 }
 
