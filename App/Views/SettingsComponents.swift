@@ -103,6 +103,8 @@ struct ExpandableRow<Label: View, Content: View>: View {
             HStack(spacing: 8) {
                 label()
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onTapGesture { withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() } }
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) { isExpanded.toggle() }
                 } label: {

@@ -107,6 +107,7 @@ struct TailscaleAutoEnable: View {
 
     @State private var isOpen = false
     @State private var credential = ""
+    @State private var showsExactChange = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: OnboardingSpacing.small) {
@@ -193,7 +194,9 @@ struct TailscaleAutoEnable: View {
             Text("Nothing else in your policy changes. If someone edits it first, iMCP saves nothing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            DisclosureGroup("Show the exact change") {
+            ExpandableRow(isExpanded: $showsExactChange) {
+                Text("Show the exact change")
+            } content: {
                 Text("nodeAttrs, new entry:\n" + plan.entryText)
                     .font(.caption.monospaced())
                     .textSelection(.enabled)
