@@ -174,17 +174,36 @@ final class PhoneConnection: ObservableObject {
         start()
     }
 
-    // MARK: - Foreground
+    // MARK: - Connection
+
+    /// The one dial in flight. The foreground loop, a background flush, and a refresh
+    /// all join it instead of dialing their own, because the Mac treats two connections
+    /// from one device as a conflict and the extra dial only delays the first.
+    private var dialTask: Task<Void, Error>?
+    /// Serves the Mac's calls on the current channel, until the channel closes.
+    private var serveTask: Task<Void, Error>?
+    private var connectionID = UUID()
+    @Published private(set) var lastConnected: Date?
+    @Published private(set) var isRefreshing = false
+
+    /// Whether the phone holds a connection to the Mac right now.
+    var isConnected: Bool { channel != nil }
 
     /// Connects and reconnects until `stop()`.
+    /// When the loop is already running but waiting out a backoff, it retries now.
     func start() {
-        guard loop == nil, credentials != nil else { return }
+        guard credentials != nil else { return }
+        if loop != nil {
+            reconnectNow()
+            return
+        }
         loop = Task { [weak self] in
             var delay: Duration = .seconds(1)
-            while !Task.isCancelled, let self, let credentials = self.credentials {
+            while !Task.isCancelled, let self, self.credentials != nil {
                 do {
-                    try await self.serve(credentials)
+                    try await self.ensureConnected(total: .seconds(30))
                     delay = .seconds(1)
+                    try await self.serveTask?.value
                 } catch {
                     if Task.isCancelled { break }
                     self.phase = .failed(error.localizedDescription)
@@ -192,8 +211,8 @@ final class PhoneConnection: ObservableObject {
                 }
                 await self.refreshQueue()
                 try? await Task.sleep(for: delay)
-                delay = min(delay * 2, .seconds(30))
-                if self.credentials != nil { self.phase = .searching }
+                delay = min(delay * 2, .seconds(10))
+                if self.credentials != nil, self.channel == nil { self.phase = .searching }
             }
         }
     }
@@ -201,14 +220,30 @@ final class PhoneConnection: ObservableObject {
     func stop() {
         loop?.cancel()
         loop = nil
+        dialTask?.cancel()
+        dialTask = nil
+        serveTask?.cancel()
+        serveTask = nil
         activeTransport = nil
         let channel = self.channel
         self.channel = nil
+        connectionID = UUID()
         Task { await channel?.disconnect() }
     }
 
-    private func serve(_ credentials: PhoneCredentials) async throws {
+    /// Returns once a channel is open, joining a dial that is already running.
+    private func ensureConnected(total: Duration) async throws {
+        if channel != nil { return }
+        if let dialTask { return try await dialTask.value }
+        guard let credentials else { throw MobileError("This device isn't paired with a Mac.") }
         phase = .searching
+        let task = Task { try await self.establish(credentials, total: total) }
+        dialTask = task
+        defer { if dialTask == task { dialTask = nil } }
+        try await task.value
+    }
+
+    private func establish(_ credentials: PhoneCredentials, total: Duration) async throws {
         let result = try await dial(
             transportMode.candidates(
                 service: credentials.service,
@@ -219,25 +254,80 @@ final class PhoneConnection: ObservableObject {
             ),
             mode: transportMode,
             device: credentials.device,
-            key: SymmetricKey(data: credentials.key)
+            key: SymmetricKey(data: credentials.key),
+            total: total
         )
+        try Task.checkCancellation()
         let updated = credentials.updating(from: result.welcome)
         if updated != credentials {
             try? updated.save()
             self.credentials = updated
         }
-        self.channel = result.channel
-        self.activeTransport = result.transport
+        adopt(result.channel, transport: result.transport)
+    }
+
+    /// Makes `channel` the connection and serves the Mac's calls on it until it closes.
+    private func adopt(_ channel: any MobileTransportChannel, transport: MobileTransportMode) {
+        let id = UUID()
+        connectionID = id
+        self.channel = channel
+        activeTransport = transport
+        lastConnected = Date()
         phase = .connected
-        defer {
-            self.channel = nil
-            self.activeTransport = nil
+        let tools = PhoneBackend.shared.tools
+        let version = self.version
+        serveTask = Task { [weak self] in
+            do {
+                try await MobilePeer.serve(channel, tools: tools, version: version)
+                self?.connectionEnded(id)
+            } catch {
+                self?.connectionEnded(id)
+                throw error
+            }
         }
-        try await MobilePeer.serve(result.channel, tools: PhoneBackend.shared.tools, version: version)
+    }
+
+    private func connectionEnded(_ id: UUID) {
+        guard connectionID == id else { return }
+        channel = nil
+        activeTransport = nil
+        if credentials != nil, phase == .connected { phase = .searching }
+    }
+
+    /// Retries now instead of waiting out the backoff.
+    private func reconnectNow() {
+        guard credentials != nil, channel == nil, dialTask == nil else { return }
+        loop?.cancel()
+        loop = nil
+        start()
     }
 
     func refreshQueue() async {
         queuedBatches = await PhoneBackend.shared.pendingBatches
+    }
+
+    /// Pull to refresh: collects changes, reuses the open connection (or retries the
+    /// dial now), and returns within `limit` whatever the Mac or HealthKit is doing,
+    /// leaving the status on screen to say what happened.
+    func refresh(limit: Duration = .seconds(8)) async {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        reconnectNow()
+        var collected = false
+        Task { @MainActor in
+            await PhoneBackend.shared.syncAll()
+            collected = true
+        }
+        let deadline = ContinuousClock.now.advanced(by: limit)
+        while ContinuousClock.now < deadline {
+            let queued = await PhoneBackend.shared.pendingBatches
+            queuedBatches = queued
+            if collected, channel != nil, queued == 0 { break }
+            if collected, channel == nil, case .failed = phase { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        await refreshQueue()
     }
 
     // MARK: - Background
@@ -258,37 +348,23 @@ final class PhoneConnection: ObservableObject {
     }
 
     private func performFlush(timeout: Duration) async -> Bool {
-        guard let credentials else { return false }
+        guard credentials != nil else { return false }
         if await PhoneBackend.shared.pendingBatches == 0 { return true }
-        // A foreground connection already serves the Mac's pulls.
-        if channel != nil { return await waitForEmptyQueue(timeout: timeout) }
+        // Whoever holds the connection (the foreground loop, or this flush) serves the Mac's pulls.
+        let owned = channel == nil && loop == nil
         do {
-            let result = try await dial(
-                transportMode.candidates(
-                    service: credentials.service,
-                    tailnetHost: credentials.tailnetHost,
-                    tailnetPort: credentials.tailnetPort,
-                    funnelURL: credentials.funnelURL,
-                    cloudflareURL: credentials.cloudflareURL
-                ),
-                mode: transportMode,
-                device: credentials.device,
-                key: SymmetricKey(data: credentials.key),
-                timeout: .seconds(10)
-            )
-            let channel = result.channel
-            let tools = PhoneBackend.shared.tools
-            let version = self.version
-            let server = Task { try await MobilePeer.serve(channel, tools: tools, version: version) }
-            let emptied = await waitForEmptyQueue(timeout: timeout)
-            await channel.disconnect()
-            server.cancel()
-            await refreshQueue()
-            return emptied
+            try await ensureConnected(total: .seconds(12))
         } catch {
             log.error("Background sync couldn't reach the Mac: \(error.localizedDescription, privacy: .public)")
             return false
         }
+        let emptied = await waitForEmptyQueue(timeout: timeout)
+        if owned, loop == nil {
+            // A flush that opened the connection closes it; a foreground loop keeps its own.
+            stop()
+        }
+        await refreshQueue()
+        return emptied
     }
 
     private func waitForEmptyQueue(timeout: Duration) async -> Bool {
@@ -332,16 +408,10 @@ final class PhoneConnection: ObservableObject {
         MobileAppGroup.defaults.removeObject(forKey: DevBootstrap.iosUnpairedDefaultsKey)
         // A new Mac has a new cache, which resets the outbox on its first pull.
         self.credentials = credentials
-        self.channel = channel
-        self.activeTransport = result.transport
-        phase = .connected
-        let tools = PhoneBackend.shared.tools
-        let version = self.version
+        adopt(channel, transport: result.transport)
         loop = Task { [weak self] in
-            try? await MobilePeer.serve(channel, tools: tools, version: version)
+            try? await self?.serveTask?.value
             guard let self else { return }
-            self.channel = nil
-            self.activeTransport = nil
             self.loop = nil
             self.start()
         }
@@ -399,7 +469,8 @@ final class PhoneConnection: ObservableObject {
         device: String,
         key: SymmetricKey?,
         revoke: Bool = false,
-        timeout: Duration = .seconds(15)
+        timeout: Duration = .seconds(15),
+        total: Duration? = nil
     ) async throws -> DialResult {
         guard !candidates.isEmpty else {
             throw MobileError(
@@ -407,11 +478,18 @@ final class PhoneConnection: ObservableObject {
             )
         }
         var lastError: Error?
+        let deadline = total.map { ContinuousClock.now.advanced(by: $0) }
         for (index, candidate) in candidates.enumerated() {
             if Task.isCancelled { throw CancellationError() }
             let isLast = index == candidates.count - 1
-            let candidateTimeout: Duration =
+            var candidateTimeout: Duration =
                 (!isLast && candidate.mode == .localOnly) ? min(timeout, .seconds(5)) : timeout
+            if let deadline {
+                // The whole dial has a budget, so a dead first path can't use it all.
+                let remaining = ContinuousClock.now.duration(to: deadline)
+                if remaining < .seconds(1) { break }
+                candidateTimeout = min(candidateTimeout, remaining)
+            }
             do {
                 switch candidate {
                 case .bonjour(let service):
