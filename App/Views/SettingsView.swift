@@ -70,13 +70,13 @@ struct SettingsView: View {
                     }
                 }
             }
-            .background(SettingsWindowConfigurator())
         }
+        .navigationSplitViewStyle(.prominentDetail)
+        .toolbarBackground(.bar, for: .windowToolbar)
+        .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
         .frame(
-            minWidth: SettingsWindowConfigurator.minimumSize.width,
-            idealWidth: SettingsWindowConfigurator.defaultSize.width,
-            minHeight: SettingsWindowConfigurator.minimumSize.height,
-            idealHeight: SettingsWindowConfigurator.defaultSize.height
+            minWidth: SettingsWindowMetrics.minimumSize.width,
+            minHeight: SettingsWindowMetrics.minimumSize.height
         )
     }
 
@@ -159,7 +159,7 @@ struct GeneralSettingsView: View {
                 }
                 .pickerStyle(.menu)
             } header: {
-                SectionTitle(title: "Approvals", symbol: "checkmark.shield")
+                Text("Approvals")
             }
 
             Section {

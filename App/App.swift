@@ -4,7 +4,6 @@ import SwiftUI
 @main
 struct App: SwiftUI.App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @Environment(\.openSettings) private var openSettings
     @StateObject private var serverController = ServerController()
     @AppStorage("isEnabled") private var isEnabled = true
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
@@ -61,12 +60,21 @@ struct App: SwiftUI.App {
         .onChange(of: appDelegate.shouldOpenSettings, initial: true) { _, shouldOpenSettings in
             guard shouldOpenSettings else { return }
             appDelegate.shouldOpenSettings = false
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+            SettingsWindowController.shared.configure(
+                serverController: serverController,
+                appDelegate: appDelegate,
+                updater: updaterController.updater
+            )
+            SettingsWindowController.shared.show()
         }
         .onChange(of: appDelegate.shouldCheckOnboarding, initial: true) { _, shouldCheck in
             guard shouldCheck else { return }
             appDelegate.shouldCheckOnboarding = false
+            SettingsWindowController.shared.configure(
+                serverController: serverController,
+                appDelegate: appDelegate,
+                updater: updaterController.updater
+            )
             #if DEBUG
                 if SettingsSnapshot.runIfRequested(
                     serverController: serverController,
@@ -103,16 +111,13 @@ struct App: SwiftUI.App {
             }
         }
 
-        Settings {
-            SettingsView(
-                serverController: serverController,
-                isMenuBarExtraInserted: appDelegate.isMenuBarExtraInserted,
-                updater: updaterController.updater
-            )
-        }
-        .windowResizability(.contentMinSize)
-
         .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    SettingsWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(replacing: .appTermination) {
                 Button("Quit") {
                     NSApplication.shared.terminate(nil)

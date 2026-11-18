@@ -114,16 +114,6 @@ struct RowLabel<Icon: View>: View {
     }
 }
 
-/// A section header with a symbol.
-struct SectionTitle: View {
-    let title: String
-    let symbol: String
-
-    var body: some View {
-        Label(title, systemImage: symbol)
-    }
-}
-
 /// A single centered symbol and one line, for a list with nothing in it.
 struct EmptyRow: View {
     let symbol: String
@@ -150,37 +140,4 @@ func copyToSettingsPasteboard(_ string: String) {
     pasteboard.clearContents()
     pasteboard.setString(string, forType: .string)
     _ = NSSound.play(.pop)
-}
-
-/// Gives the Settings window a minimum size, makes sure it can be resized,
-/// and remembers the size and position that the person chose.
-struct SettingsWindowConfigurator: NSViewRepresentable {
-    static let defaultSize = NSSize(width: 760, height: 560)
-    static let minimumSize = NSSize(width: 640, height: 440)
-    static let autosaveName = "iMCPSettingsWindow"
-
-    func makeNSView(context: Context) -> NSView {
-        ConfiguratorView()
-    }
-
-    func updateNSView(_ nsView: NSView, context: Context) {}
-
-    private final class ConfiguratorView: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            guard let window else { return }
-            #if DEBUG
-                // Screenshots choose their own window size.
-                if SettingsSnapshot.isRequested { return }
-            #endif
-            window.styleMask.insert(.resizable)
-            window.contentMinSize = SettingsWindowConfigurator.minimumSize
-            // A saved frame, if there is one, wins over the default size.
-            if !window.setFrameUsingName(SettingsWindowConfigurator.autosaveName) {
-                window.setContentSize(SettingsWindowConfigurator.defaultSize)
-                window.center()
-            }
-            window.setFrameAutosaveName(SettingsWindowConfigurator.autosaveName)
-        }
-    }
 }

@@ -12,7 +12,6 @@ import SwiftUI
 struct ContentView: View {
     @ObservedObject var serverController: ServerController
     @Binding var isEnabled: Bool
-    @Environment(\.openSettings) private var openSettings
     @Environment(\.dismiss) private var dismiss
 
     private let updater: SPUUpdater
@@ -156,9 +155,7 @@ struct ContentView: View {
     private func run(_ action: MenuAction) {
         switch action {
         case .settings:
-            // openSettings() alone is unreliable for this accessory (LSUIElement) app.
-            NSApp.activate(ignoringOtherApps: true)
-            openSettings()
+            SettingsWindowController.shared.show()
         case .checkForUpdates:
             updater.checkForUpdates()
         case .about:
