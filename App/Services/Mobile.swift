@@ -130,6 +130,8 @@ actor MobileService: MobileBackend {
     private var activityStore: MobileActivityStore?
     private let pairings: any MobilePairingStore
     private let reconnectGrace: Duration
+    private let livenessTimeout: Duration
+    private let activityStoreOpener: @Sendable () throws -> MobileActivityStore
     private let advertise: Bool
     private let pollInterval: Duration
     private let codeLifetime: TimeInterval
@@ -163,6 +165,8 @@ actor MobileService: MobileBackend {
         activityStore: MobileActivityStore? = nil,
         pairings: any MobilePairingStore = MobileKeychainPairings(),
         reconnectGrace: Duration = .seconds(5),
+        livenessTimeout: Duration = .seconds(3),
+        activityStoreOpener: @escaping @Sendable () throws -> MobileActivityStore = { try .standard() },
         advertise: Bool = true,
         pollInterval: Duration = .seconds(15),
         codeLifetime: TimeInterval = MobileService.pairingLifetime,
@@ -172,6 +176,8 @@ actor MobileService: MobileBackend {
         self.activityStore = activityStore
         self.pairings = pairings
         self.reconnectGrace = reconnectGrace
+        self.livenessTimeout = livenessTimeout
+        self.activityStoreOpener = activityStoreOpener
         self.advertise = advertise
         self.pollInterval = pollInterval
         self.codeLifetime = codeLifetime
@@ -895,8 +901,15 @@ actor MobileService: MobileBackend {
                 // Disconnecting the client fails its pending requests and stops its receive loop.
                 await link.close()
             }
-            attach(link)
-            log.notice("\(device.name, privacy: .public) connected via \(transportMode.shortLabel, privacy: .public)")
+            if await attach(link) {
+                log.notice(
+                    "\(device.name, privacy: .public) connected via \(transportMode.shortLabel, privacy: .public)"
+                )
+            } else {
+                log.notice(
+                    "\(device.name, privacy: .public) opened a second connection via \(transportMode.shortLabel, privacy: .public); kept the live one"
+                )
+            }
         } catch {
             await channel.disconnect()
             throw error
@@ -906,12 +919,27 @@ actor MobileService: MobileBackend {
     // MARK: - Links
 
     /// Makes `link` the connection that calls go to, replacing any other.
-    func attach(_ link: any MobilePeerLink) {
+    ///
+    /// A second connection from the device that already has a live one
+    /// (the phone dials from two places, or a Tailscale and a Local Network path race)
+    /// doesn't replace it while it still answers a quick status call,
+    /// because replacing it would cancel the sync in progress and start the same fight again.
+    /// A link that doesn't answer is stale, so the new one replaces it.
+    /// Returns whether `link` is now the connection; if not, it has been closed.
+    @discardableResult
+    func attach(_ link: any MobilePeerLink) async -> Bool {
+        if let current = self.link, current !== link, current.device.id == link.device.id,
+            await current.answers(within: livenessTimeout), self.link === current
+        {
+            await link.close()
+            return false
+        }
         let previous = self.link
         self.link = link
         if let previous, previous !== link { Task { await previous.close() } }
         syncTask?.cancel()
         syncTask = Task { [weak self] in await self?.syncLoop(link) }
+        return true
     }
 
     func detach(_ link: any MobilePeerLink) {
@@ -957,8 +985,10 @@ actor MobileService: MobileBackend {
     private func syncLoop(_ link: any MobilePeerLink) async {
         await refreshPhoneStatus(link)
         while !Task.isCancelled, self.link === link {
-            await drain(link)
+            // Activity first: it is small, and a long drain of queued batches
+            // must not keep the phone's history empty if the connection is short.
             await syncActivity(link)
+            await drain(link)
             try? await Task.sleep(for: pollInterval)
         }
     }
@@ -967,7 +997,7 @@ actor MobileService: MobileBackend {
 
     private func openActivityStore() throws -> MobileActivityStore {
         if let activityStore { return activityStore }
-        let store = try MobileActivityStore.standard()
+        let store = try activityStoreOpener()
         self.activityStore = store
         return store
     }
@@ -988,7 +1018,8 @@ actor MobileService: MobileBackend {
 
     /// Pushes unsent activity events to `link` and records the phone's acknowledgement.
     func syncActivity(_ link: any MobilePeerLink) async {
-        guard let store = activityStore else { return }
+        // Open the store from disk: after a relaunch it holds events that no phone has received yet.
+        guard let store = try? openActivityStore() else { return }
         if syncingActivity {
             needsActivitySync = true
             return
@@ -1051,7 +1082,12 @@ actor MobileService: MobileBackend {
         } catch is MobileLinkLost {
             detach(link)
         } catch {
-            log.error("Mobile sync failed: \(error.localizedDescription, privacy: .public)")
+            // A newer connection or a disconnect cancels the sync; that isn't a failure.
+            if error is CancellationError || Task.isCancelled {
+                log.debug("Mobile sync cancelled")
+            } else {
+                log.error("Mobile sync failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -1342,6 +1378,31 @@ protocol MobilePeerLink: AnyObject, Sendable {
 
 extension MobilePeerLink {
     var transportMode: MobileTransportMode { .localOnly }
+
+    /// Whether the phone answers a status call within `timeout`.
+    /// Any reply, even an error from the phone, means the connection is alive.
+    func answers(within timeout: Duration) async -> Bool {
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                do {
+                    _ = try await self.call(MobileTools.statusTool, [:])
+                    return true
+                } catch is MobileLinkLost {
+                    return false
+                } catch is CancellationError {
+                    return false
+                } catch {
+                    return true
+                }
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return false
+            }
+            defer { group.cancelAll() }
+            return await group.next() ?? false
+        }
+    }
 }
 
 struct MobileLinkLost: Error, CustomStringConvertible {
@@ -1379,6 +1440,7 @@ final class MobileRemoteLink: MobilePeerLink, @unchecked Sendable {
                     let result = try await client.callTool(name: tool, arguments: input)
                     return (result.content, result.isError)
                 } catch {
+                    if error is CancellationError { throw error }
                     if await channel.isClosed { throw MobileLinkLost() }
                     throw MobileError("The iPhone or iPad didn't answer: \(error.localizedDescription)")
                 }

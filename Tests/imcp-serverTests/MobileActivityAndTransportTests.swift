@@ -184,6 +184,39 @@ final class MobileActivityAndTransportTests: XCTestCase {
         await session.channel.disconnect()
     }
 
+    func testActivityPersistedBeforeARelaunchReachesThePhoneWithoutNewToolCalls() async throws {
+        let activityURL = directory.appendingPathComponent("activity.json")
+        let before = try MobileActivityStore(url: activityURL)
+        await before.record(
+            MobileActivityEvent(
+                clientName: "Claude Desktop",
+                serviceName: "Notes",
+                toolName: "notes_search",
+                isWrite: false,
+                outcome: .succeeded,
+                durationMs: 5
+            )
+        )
+        // A relaunched Mac has no store in memory; it opens the one on disk.
+        let service = MobileService(
+            cache: try MobileCache(
+                url: directory.appendingPathComponent("cache.sqlite"),
+                key: SymmetricKey(size: .bits256)
+            ),
+            pairings: MobileMemoryPairings(),
+            activityStoreOpener: { try MobileActivityStore(url: activityURL) },
+            advertise: false,
+            pollInterval: .seconds(60)
+        )
+        let link = RecordingActivityLink()
+        await service.attach(link)
+        for _ in 0 ..< 100 where link.sent.isEmpty {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTAssertEqual(link.sent.count, 1)
+        await service.stop()
+    }
+
     // MARK: - MobilePairingCode Multi-Transport
 
     func testPairingCodeRoundTripsMultiTransportEndpoints() throws {
@@ -562,6 +595,39 @@ private actor InMemoryFrameWire: MobileFrameWire {
     func receiveFrame() async throws -> Data? {
         guard !incoming.isEmpty else { return nil }
         return incoming.removeFirst()
+    }
+
+    func close() async {}
+}
+
+private final class RecordingActivityLink: MobilePeerLink, @unchecked Sendable {
+    let device = MobileDevice(id: "phone-1", name: "Test iPhone", pairedAt: Date())
+    private let lock = NSLock()
+    private var events: [MobileActivityEvent] = []
+
+    var sent: [MobileActivityEvent] { lock.withLock { events } }
+
+    func call(_ tool: String, _ input: [String: Value]) async throws -> String {
+        switch tool {
+        case MobileActivityLink.syncTool:
+            let request = try MobileCoding.decoder.decode(
+                MobileActivitySyncRequest.self,
+                from: JSONEncoder().encode(input)
+            )
+            lock.withLock { events += request.events }
+            let acked = request.events.map(\.sequence).max() ?? 0
+            return String(
+                decoding: try MobileCoding.encoder.encode(MobileActivitySyncResponse(ackedSequence: acked)),
+                as: UTF8.self
+            )
+        case MobileLink.pullTool:
+            return String(
+                decoding: try MobileCoding.encoder.encode(MobileBatch(sequence: 0, syncedAt: [:], records: [])),
+                as: UTF8.self
+            )
+        default:
+            return "{}"
+        }
     }
 
     func close() async {}
