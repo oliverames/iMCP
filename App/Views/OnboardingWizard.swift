@@ -88,11 +88,12 @@ struct OnboardingView: View {
             case .welcome: EmptyView()
             case .services: ServicesScreen(model: model, serverController: model.serverController)
             case .connectApps: ConnectAppsScreen(model: model)
-            case .remoteAccess:
+            case .remoteAccess, .remoteSetup:
                 RemoteAccessScreen(
                     model: model,
                     serverController: model.serverController,
-                    cloudflare: model.serverController.cloudflareTunnel
+                    cloudflare: model.serverController.cloudflareTunnel,
+                    isSetup: model.step == .remoteSetup
                 )
             case .iPhone: IPhoneScreen(model: model)
             case .done: DoneScreen(model: model, serverController: model.serverController)
@@ -146,7 +147,7 @@ struct OnboardingView: View {
             Button("Continue") { model.continueTapped() }
                 .onboardingPrimary()
                 .accessibilityIdentifier("onboarding.continue")
-        case .connectApps, .iPhone:
+        case .connectApps, .iPhone, .remoteSetup:
             if model.progress.isComplete(model.step) {
                 Button("Continue") { model.continueTapped() }
                     .onboardingPrimary()

@@ -25,7 +25,10 @@ enum OnboardingStep: String, Equatable, Sendable, CaseIterable {
     case services
     /// Optional: how AI apps reach this Mac from outside. Comes before the apps,
     /// because the cloud agents need the public address it sets up.
+    /// This screen only picks the way; the next one sets it up.
     case remoteAccess
+    /// Optional: sets up the way that was picked. Skipped for Local only, which needs nothing.
+    case remoteSetup
     /// Adding iMCP to Claude Desktop and Claude Code, and the connector URL for
     /// Claude Duet, Muse and Gemini.
     case connectApps
@@ -34,7 +37,7 @@ enum OnboardingStep: String, Equatable, Sendable, CaseIterable {
     case done
 
     /// Steps a person can skip without changing anything.
-    var isOptional: Bool { self == .remoteAccess || self == .iPhone }
+    var isOptional: Bool { self == .remoteAccess || self == .remoteSetup || self == .iPhone }
 }
 
 /// What is already set up, read from the app's live state when the window opens
@@ -50,7 +53,7 @@ struct OnboardingProgress: Equatable, Sendable {
         case .welcome, .done: return true
         case .services: return hasServices
         case .connectApps: return hasConnectedApp
-        case .remoteAccess: return hasRemoteAccess
+        case .remoteAccess, .remoteSetup: return hasRemoteAccess
         case .iPhone: return hasPairedDevice
         }
     }
@@ -60,25 +63,33 @@ struct OnboardingProgress: Equatable, Sendable {
 /// person who skipped a step never lands on it by going back.
 struct OnboardingNavigator: Equatable, Sendable {
     /// The guided screens after the Welcome, in order.
-    static let guidedSteps: [OnboardingStep] = [.services, .remoteAccess, .connectApps, .iPhone, .done]
+    static let guidedSteps: [OnboardingStep] = [.services, .remoteAccess, .remoteSetup, .connectApps, .iPhone, .done]
 
     let mode: OnboardingMode
     private(set) var step: OnboardingStep
     private(set) var history: [OnboardingStep] = []
+    /// The way picked on the remote access screen. Local only needs no setup screen.
+    private(set) var remoteChoice: RemoteChoice
     /// Fixed when the window opens, so the page dots do not jump as steps complete.
-    let pageSteps: [OnboardingStep]
+    private let firstPageStep: OnboardingStep
 
-    init(mode: OnboardingMode, progress: OnboardingProgress) {
+    /// The dots: every guided step from where the window opened, without the remote setup screen
+    /// while the choice is Local only, because that screen is skipped.
+    var pageSteps: [OnboardingStep] {
+        let start = Self.guidedSteps.firstIndex(of: firstPageStep) ?? 0
+        return Self.guidedSteps[start...].filter { $0 != .remoteSetup || remoteChoice != .local }
+    }
+
+    init(mode: OnboardingMode, progress: OnboardingProgress, remoteChoice: RemoteChoice = .local) {
         self.mode = mode
+        self.remoteChoice = remoteChoice
         let entry = Self.entryStep(mode: mode, progress: progress)
         self.step = entry
-        switch mode {
-        case .firstRun:
-            self.pageSteps = Self.guidedSteps
-        case .finishSetup:
-            let start = Self.guidedSteps.firstIndex(of: entry) ?? 0
-            self.pageSteps = Array(Self.guidedSteps[start...])
-        }
+        self.firstPageStep = mode == .firstRun ? .services : entry
+    }
+
+    mutating func setRemoteChoice(_ choice: RemoteChoice) {
+        remoteChoice = choice
     }
 
     /// Where a mode starts. Set Up iMCP resumes at the first incomplete
@@ -97,7 +108,8 @@ struct OnboardingNavigator: Equatable, Sendable {
         switch step {
         case .welcome: return .services
         case .services: return .remoteAccess
-        case .remoteAccess: return .connectApps
+        case .remoteAccess: return .remoteSetup
+        case .remoteSetup: return .connectApps
         case .connectApps: return .iPhone
         case .iPhone: return .done
         case .done: return .done
@@ -113,7 +125,9 @@ struct OnboardingNavigator: Equatable, Sendable {
 
     /// Continue, or Skip on an optional step.
     mutating func advance() {
-        let next = Self.step(after: step)
+        var next = Self.step(after: step)
+        // Local only needs nothing set up, so its setup screen is skipped.
+        if next == .remoteSetup, remoteChoice == .local { next = Self.step(after: .remoteSetup) }
         guard next != step else { return }
         history.append(step)
         step = next

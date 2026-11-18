@@ -51,7 +51,7 @@ final class OnboardingModel: ObservableObject {
     /// Starts over in `mode`, reading what is already set up.
     func reset(mode: OnboardingMode) {
         remoteSelection = currentRemoteChoice
-        navigator = OnboardingNavigator(mode: mode, progress: progress)
+        navigator = OnboardingNavigator(mode: mode, progress: progress, remoteChoice: currentRemoteChoice)
         Task { await refreshDevices() }
         updatePolling()
     }
@@ -150,6 +150,7 @@ final class OnboardingModel: ObservableObject {
     /// Cloudflare only becomes selected here; it needs a login and a hostname first.
     func choose(_ choice: RemoteChoice) {
         remoteSelection = choice
+        navigator.setRemoteChoice(choice)
         let target = choice.switches
         if serverController.isRemoteAccessEnabled != target.tailscale {
             serverController.isRemoteAccessEnabled = target.tailscale
