@@ -124,11 +124,19 @@ actor MobileService: MobileBackend {
     static let cloudflareEnabledKey = "mobileCloudflareEnabled"
     static let cloudflareURLKey = "mobileCloudflareURL"
     static let cloudflareLocalPortKey = "mobileCloudflareLocalPort"
+    /// The order the owner chose for the routes the Mac offers, as `MobileRouteKind` raw values.
+    static let routeOrderKey = "mobileRouteOrder"
+    /// Routes the owner turned off, as `MobileRouteKind` raw values.
+    static let disabledRoutesKey = "mobileDisabledRoutes"
+    /// Whether the Mac tells the phone to show activity history. On unless turned off.
+    static let activityHistoryKey = "mobileActivityHistoryEnabled"
 
     private let log = Logger.service("mobile")
     private var cache: MobileCache?
     private var activityStore: MobileActivityStore?
     private let pairings: any MobilePairingStore
+    private let defaults: UserDefaults
+    private let ledger: MobileConfigurationLedger
     private let reconnectGrace: Duration
     private let livenessTimeout: Duration
     private let activityStoreOpener: @Sendable () throws -> MobileActivityStore
@@ -164,6 +172,7 @@ actor MobileService: MobileBackend {
         cache: MobileCache? = nil,
         activityStore: MobileActivityStore? = nil,
         pairings: any MobilePairingStore = MobileKeychainPairings(),
+        defaults: UserDefaults = .standard,
         reconnectGrace: Duration = .seconds(5),
         livenessTimeout: Duration = .seconds(3),
         activityStoreOpener: @escaping @Sendable () throws -> MobileActivityStore = { try .standard() },
@@ -175,6 +184,8 @@ actor MobileService: MobileBackend {
         self.cache = cache
         self.activityStore = activityStore
         self.pairings = pairings
+        self.defaults = defaults
+        ledger = MobileConfigurationLedger(defaults: defaults)
         self.reconnectGrace = reconnectGrace
         self.livenessTimeout = livenessTimeout
         self.activityStoreOpener = activityStoreOpener
@@ -201,6 +212,27 @@ actor MobileService: MobileBackend {
     ) -> Bool {
         ["alarmsEnabled", "healthEnabled"].contains { defaults.bool(forKey: $0) }
             || (RemoteApprovals.isEnabled(in: defaults) && hasPairedDevice())
+    }
+
+    /// Saves the order of the routes that the Mac offers.
+    nonisolated static func setRouteOrder(_ order: [MobileRouteKind], defaults: UserDefaults = .standard) {
+        defaults.set(order.map(\.rawValue), forKey: routeOrderKey)
+    }
+
+    /// Turns a route on or off. Tailscale VPN and Cloudflare Tunnel use the settings that already switch them.
+    nonisolated static func setRoute(_ kind: MobileRouteKind, enabled: Bool, defaults: UserDefaults = .standard) {
+        switch kind {
+        case .tailscaleVPN:
+            defaults.set(enabled, forKey: tailscaleVPNEnabledKey)
+        case .cloudflare:
+            // A managed tunnel can keep Cloudflare on without this key, so the choice is also kept as a disabled route.
+            defaults.set(enabled, forKey: cloudflareEnabledKey)
+            fallthrough
+        case .local, .tailscaleFunnel:
+            var disabled = Set(defaults.stringArray(forKey: disabledRoutesKey) ?? [])
+            if enabled { disabled.remove(kind.rawValue) } else { disabled.insert(kind.rawValue) }
+            defaults.set(disabled.sorted(), forKey: disabledRoutesKey)
+        }
     }
 
     /// Whether `service` is one of the services that this actor serves.
@@ -240,6 +272,7 @@ actor MobileService: MobileBackend {
         } catch {
             log.error("Couldn't update mobile transport listeners: \(error.localizedDescription, privacy: .public)")
         }
+        await pushConfiguration()
     }
 
     /// Updates the Tailscale VPN host and Tailscale Funnel WebSocket URL from `RemoteAccessServer`.
@@ -247,42 +280,76 @@ actor MobileService: MobileBackend {
         let trimmedHost = tailnetHost?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.advertisedTailnetHost = (trimmedHost?.isEmpty == false) ? trimmedHost : nil
         self.advertisedFunnelURL = MobileLink.normalizedWebSocketURL(funnelURL)
+        Task { await pushConfiguration() }
     }
 
-    var currentEndpoints: MobileRemoteEndpoints {
+    /// The Mac's settings and live addresses, as the configuration is built from them.
+    var currentState: MobileMacState {
         let mode =
-            UserDefaults.standard.string(forKey: Self.transportModeKey)
-            .flatMap(MobileTransportMode.init(rawValue:)) ?? .automatic
-        guard mode != .localOnly else {
-            return MobileRemoteEndpoints()
+            defaults.string(forKey: Self.transportModeKey).flatMap(MobileTransportMode.init(rawValue:)) ?? .automatic
+        var disabled = Set(
+            (defaults.stringArray(forKey: Self.disabledRoutesKey) ?? []).compactMap(MobileRouteKind.init(rawValue:))
+        )
+        var host: String?
+        if defaults.object(forKey: Self.tailscaleVPNEnabledKey) as? Bool ?? true {
+            let override = defaults.string(forKey: Self.tailscaleHostOverrideKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            host = (override?.isEmpty == false) ? override : advertisedTailnetHost
+        } else {
+            disabled.insert(.tailscaleVPN)
         }
-        let vpnEnabled = UserDefaults.standard.object(forKey: Self.tailscaleVPNEnabledKey) as? Bool ?? true
-        let overrideHost = UserDefaults.standard.string(forKey: Self.tailscaleHostOverrideKey)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let host = vpnEnabled ? ((overrideHost?.isEmpty == false) ? overrideHost : advertisedTailnetHost) : nil
-        let storedPort = UserDefaults.standard.integer(forKey: Self.remotePortKey)
+        let storedPort = defaults.integer(forKey: Self.remotePortKey)
         let effectivePort =
             (storedPort > 0 && storedPort <= Int(UInt16.max)) ? UInt16(storedPort) : MobileLink.defaultRemotePort
-        let cloudflareTunnelEnabled =
-            UserDefaults.standard.bool(forKey: "cloudflareTunnelEnabled")
-            && !((UserDefaults.standard.string(forKey: "cloudflareTunnelHostname") ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        let cloudflareEnabled = UserDefaults.standard.bool(forKey: Self.cloudflareEnabledKey) || cloudflareTunnelEnabled
-        let configuredCFURL = UserDefaults.standard.string(forKey: Self.cloudflareURLKey)
-        let derivedTunnelCFURL = UserDefaults.standard.string(forKey: "cloudflareTunnelHostname")
-            .flatMap { raw -> String? in
-                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : "wss://\(trimmed)\(MobileLink.mobileWebSocketPath)"
-            }
-        let cloudflareURL =
-            cloudflareEnabled
-            ? MobileLink.normalizedWebSocketURL(configuredCFURL ?? derivedTunnelCFURL)
-            : nil
-        return MobileRemoteEndpoints(
+        let tunnelHostname = defaults.string(forKey: "cloudflareTunnelHostname")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let tunnelEnabled = defaults.bool(forKey: "cloudflareTunnelEnabled") && tunnelHostname?.isEmpty == false
+        var cloudflareURL: String?
+        if defaults.bool(forKey: Self.cloudflareEnabledKey) || tunnelEnabled {
+            let configured = defaults.string(forKey: Self.cloudflareURLKey)
+            let derived = tunnelHostname.flatMap { $0.isEmpty ? nil : "wss://\($0)\(MobileLink.mobileWebSocketPath)" }
+            cloudflareURL = MobileLink.normalizedWebSocketURL(configured ?? derived)
+        } else {
+            disabled.insert(.cloudflare)
+        }
+        return MobileMacState(
+            macName: Host.current().localizedName ?? "Mac",
+            service: Self.serviceName,
+            recommendedMode: mode,
+            order: (defaults.stringArray(forKey: Self.routeOrderKey) ?? []).compactMap(MobileRouteKind.init(rawValue:)),
+            disabled: disabled,
             tailnetHost: host,
             tailnetPort: host != nil ? effectivePort : nil,
             funnelURL: advertisedFunnelURL,
-            cloudflareURL: cloudflareURL
+            cloudflareURL: cloudflareURL,
+            features: MobileFeatures(
+                approvals: RemoteApprovals.isEnabled(in: defaults),
+                activityHistory: defaults.object(forKey: Self.activityHistoryKey) as? Bool ?? true
+            )
+        )
+    }
+
+    /// What the Mac offers, with the revision that this offer has.
+    /// The revision goes up when the offer changes and never otherwise.
+    var currentConfiguration: MobileConfiguration {
+        ledger.configuration(for: currentState)
+    }
+
+    /// The revision that `device` last said it applied, or nil if it hasn't said.
+    func appliedConfigurationRevision(for device: String) -> Int? {
+        ledger.appliedRevision(for: device)
+    }
+
+    /// What the Mac offers a phone from before configurations existed.
+    /// A route that the owner turned off is left out.
+    var currentEndpoints: MobileRemoteEndpoints {
+        let offered = MobileConfigurationBuilder.build(currentState, revision: 0)
+        guard currentState.recommendedMode != .localOnly else { return MobileRemoteEndpoints() }
+        return MobileRemoteEndpoints(
+            tailnetHost: offered.tailnetHost,
+            tailnetPort: offered.tailnetPort,
+            funnelURL: offered.funnelURL,
+            cloudflareURL: offered.cloudflareURL
         )
     }
 
@@ -567,6 +634,7 @@ actor MobileService: MobileBackend {
         if pairings is MobileKeychainPairings {
             DevBootstrap.markMacDeviceUnpaired(device)
         }
+        ledger.forget(device)
         await activityStore?.resetAcknowledgement(for: device)
         if let current = link, current.device.id == device {
             link = nil
@@ -604,7 +672,8 @@ actor MobileService: MobileBackend {
             tailnetHost: endpoints.tailnetHost,
             tailnetPort: endpoints.tailnetPort,
             funnelURL: endpoints.funnelURL,
-            cloudflareURL: endpoints.cloudflareURL
+            cloudflareURL: endpoints.cloudflareURL,
+            configuration: ok ? currentConfiguration : nil
         )
     }
 
@@ -984,12 +1053,42 @@ actor MobileService: MobileBackend {
 
     private func syncLoop(_ link: any MobilePeerLink) async {
         await refreshPhoneStatus(link)
+        await pushConfiguration(to: link)
         while !Task.isCancelled, self.link === link {
             // Activity first: it is small, and a long drain of queued batches
             // must not keep the phone's history empty if the connection is short.
             await syncActivity(link)
             await drain(link)
             try? await Task.sleep(for: pollInterval)
+        }
+    }
+
+    // MARK: - Configuration
+
+    /// Sends the current configuration to the connected phone, if there is one.
+    func pushConfiguration() async {
+        guard let link else { return }
+        await pushConfiguration(to: link)
+    }
+
+    /// Calls `config_apply` on `link` and records the revision the phone says it holds.
+    /// A phone from before configurations existed doesn't know the tool; that is not an error,
+    /// because it still got the individual endpoints in its welcome.
+    func pushConfiguration(to link: any MobilePeerLink) async {
+        let configuration = currentConfiguration
+        do {
+            let request = MobileConfigApplyRequest(configuration: configuration)
+            let arguments = try JSONDecoder().decode(
+                [String: Value].self,
+                from: MobileCoding.encoder.encode(request)
+            )
+            let text = try await link.call(MobileConfigLink.applyTool, arguments)
+            let response = try MobileCoding.decoder.decode(MobileConfigApplyResponse.self, from: Data(text.utf8))
+            ledger.recordApplied(response.revision, for: link.device.id)
+        } catch is MobileLinkLost {
+            detach(link)
+        } catch {
+            log.debug("Configuration push skipped or failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -1018,6 +1117,7 @@ actor MobileService: MobileBackend {
 
     /// Pushes unsent activity events to `link` and records the phone's acknowledgement.
     func syncActivity(_ link: any MobilePeerLink) async {
+        guard currentState.features.activityHistory else { return }
         // Open the store from disk: after a relaunch it holds events that no phone has received yet.
         guard let store = try? openActivityStore() else { return }
         if syncingActivity {
@@ -1317,6 +1417,46 @@ struct MobileDevice: Codable, Equatable, Identifiable, Sendable {
     var id: String
     var name: String
     var pairedAt: Date
+}
+
+/// Numbers the configuration that the Mac offers and remembers what each phone applied.
+///
+/// The revision goes up by one whenever the offer's content changes,
+/// and the last content is kept so a relaunch with the same settings keeps the same revision.
+struct MobileConfigurationLedger: @unchecked Sendable {
+    let defaults: UserDefaults
+    static let revisionKey = "mobileConfigRevision"
+    static let contentKey = "mobileConfigContent"
+    static let appliedKey = "mobileConfigApplied"
+
+    var revision: Int { defaults.integer(forKey: Self.revisionKey) }
+
+    func configuration(for state: MobileMacState) -> MobileConfiguration {
+        let content = (try? MobileCoding.encoder.encode(MobileConfigurationBuilder.build(state, revision: 0))) ?? Data()
+        var revision = self.revision
+        if revision < 1 || defaults.data(forKey: Self.contentKey) != content {
+            revision += 1
+            defaults.set(revision, forKey: Self.revisionKey)
+            defaults.set(content, forKey: Self.contentKey)
+        }
+        return MobileConfigurationBuilder.build(state, revision: revision)
+    }
+
+    func appliedRevision(for device: String) -> Int? {
+        (defaults.dictionary(forKey: Self.appliedKey) as? [String: Int])?[device]
+    }
+
+    func recordApplied(_ revision: Int, for device: String) {
+        var applied = (defaults.dictionary(forKey: Self.appliedKey) as? [String: Int]) ?? [:]
+        applied[device] = revision
+        defaults.set(applied, forKey: Self.appliedKey)
+    }
+
+    func forget(_ device: String) {
+        var applied = (defaults.dictionary(forKey: Self.appliedKey) as? [String: Int]) ?? [:]
+        applied[device] = nil
+        defaults.set(applied, forKey: Self.appliedKey)
+    }
 }
 
 /// Where the Mac keeps paired devices and their keys.
