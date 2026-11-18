@@ -140,7 +140,7 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         id: "claudeCode",
         name: "Claude Code",
         kind: .onThisMac,
-        logoAsset: nil,
+        logoAsset: "ConnectorClaudeCode",
         symbol: "terminal",
         instructionID: "claude-code",
         steps: "Press Set Up. iMCP adds itself to Claude Code.",
@@ -148,13 +148,14 @@ struct KnownClient: Identifiable, Equatable, Sendable {
     )
     static let claudeAI = KnownClient(
         id: "claudeAI",
-        name: "claude.ai",
+        name: "Claude Web",
         kind: .cloud,
         logoAsset: "ConnectorClaude",
         symbol: "bubble.left.fill",
         instructionID: "claude-ai",
-        steps: "In claude.ai, open Settings, then Connectors, then Add custom connector. Paste the address.",
-        aliases: ["claude.ai", "claude"]
+        steps:
+            "In Claude Web (claude.ai), open Settings, then Connectors, then Add custom connector. Paste the address.",
+        aliases: ["claude web", "claude.ai", "claude"]
     )
     static let claudeDuet = KnownClient(
         id: "claudeDuet",
