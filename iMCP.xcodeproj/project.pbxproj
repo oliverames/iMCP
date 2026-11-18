@@ -12,7 +12,9 @@
 		B15000000000000000000022 /* ../../App/Models/RemoteAccessChecklist.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */; };
 		B15000000000000000000024 /* RemoteAccessChecklistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000023 /* RemoteAccessChecklistTests.swift */; };
 		B15000000000000000000012 /* ../../App/Models/OnboardingFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */; };
+		B15000000000000000000092 /* ../../App/Models/SettingsCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000091 /* ../../App/Models/SettingsCatalog.swift */; };
 		B15000000000000000000014 /* OnboardingFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000013 /* OnboardingFlowTests.swift */; };
+		B15000000000000000000094 /* SettingsCatalogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000093 /* SettingsCatalogTests.swift */; };
 		B15000000000000000000002 /* ../../App/Models/MenuStructure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */; };
 		B15000000000000000000004 /* MenuStructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000003 /* MenuStructureTests.swift */; };
 		0C442369FEFC71CA64EFDDCD /* MobileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E70399C0AD0A7EF1C0755801 /* MobileCacheTests.swift */; };
@@ -209,7 +211,9 @@
 		B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/RemoteAccessChecklist.swift; sourceTree = "<group>"; };
 		B15000000000000000000023 /* RemoteAccessChecklistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessChecklistTests.swift; sourceTree = "<group>"; };
 		B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/OnboardingFlow.swift; sourceTree = "<group>"; };
+		B15000000000000000000091 /* ../../App/Models/SettingsCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/SettingsCatalog.swift; sourceTree = "<group>"; };
 		B15000000000000000000013 /* OnboardingFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowTests.swift; sourceTree = "<group>"; };
+		B15000000000000000000093 /* SettingsCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCatalogTests.swift; sourceTree = "<group>"; };
 		B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/MenuStructure.swift; sourceTree = "<group>"; };
 		B15000000000000000000003 /* MenuStructureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuStructureTests.swift; sourceTree = "<group>"; };
 		485454500000000000000014 /* ../../App/Controllers/FunnelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Controllers/FunnelAccess.swift; sourceTree = "<group>"; };
@@ -576,7 +580,9 @@
 				B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */,
 				B15000000000000000000003 /* MenuStructureTests.swift */,
 				B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */,
+				B15000000000000000000091 /* ../../App/Models/SettingsCatalog.swift */,
 				B15000000000000000000013 /* OnboardingFlowTests.swift */,
+				B15000000000000000000093 /* SettingsCatalogTests.swift */,
 				B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */,
 				B15000000000000000000023 /* RemoteAccessChecklistTests.swift */,
 				B13800000000000000000020 /* ../../Shared/Models/ApprovalMode.swift */,
@@ -1051,7 +1057,9 @@
 				B15000000000000000000002 /* ../../App/Models/MenuStructure.swift in Sources */,
 				B15000000000000000000004 /* MenuStructureTests.swift in Sources */,
 				B15000000000000000000012 /* ../../App/Models/OnboardingFlow.swift in Sources */,
+				B15000000000000000000092 /* ../../App/Models/SettingsCatalog.swift in Sources */,
 				B15000000000000000000014 /* OnboardingFlowTests.swift in Sources */,
+				B15000000000000000000094 /* SettingsCatalogTests.swift in Sources */,
 				B15000000000000000000022 /* ../../App/Models/RemoteAccessChecklist.swift in Sources */,
 				B15000000000000000000024 /* RemoteAccessChecklistTests.swift in Sources */,
 				B13800000000000000000021 /* ../../Shared/Models/ApprovalMode.swift in Sources */,

@@ -108,38 +108,62 @@ struct KnownClient: Identifiable, Equatable, Sendable {
     let aliases: [String]
 
     static let claudeDesktop = KnownClient(
-        id: "claudeDesktop", name: "Claude Desktop", kind: .onThisMac,
-        logoAsset: "ConnectorClaude", symbol: "bubble.left.fill", instructionID: "claude-desktop",
+        id: "claudeDesktop",
+        name: "Claude Desktop",
+        kind: .onThisMac,
+        logoAsset: "ConnectorClaude",
+        symbol: "bubble.left.fill",
+        instructionID: "claude-desktop",
         steps: "Press Set Up. iMCP adds itself to Claude Desktop.",
         aliases: ["claude desktop"]
     )
     static let claudeCode = KnownClient(
-        id: "claudeCode", name: "Claude Code", kind: .onThisMac,
-        logoAsset: nil, symbol: "terminal", instructionID: "claude-code",
+        id: "claudeCode",
+        name: "Claude Code",
+        kind: .onThisMac,
+        logoAsset: nil,
+        symbol: "terminal",
+        instructionID: "claude-code",
         steps: "Press Set Up. iMCP adds itself to Claude Code.",
         aliases: ["claude code", "claude-code"]
     )
     static let claudeAI = KnownClient(
-        id: "claudeAI", name: "claude.ai", kind: .cloud,
-        logoAsset: "ConnectorClaude", symbol: "bubble.left.fill", instructionID: "claude-ai",
+        id: "claudeAI",
+        name: "claude.ai",
+        kind: .cloud,
+        logoAsset: "ConnectorClaude",
+        symbol: "bubble.left.fill",
+        instructionID: "claude-ai",
         steps: "In claude.ai, open Settings, then Connectors, then Add custom connector. Paste the address.",
         aliases: ["claude.ai", "claude"]
     )
     static let claudeDuet = KnownClient(
-        id: "claudeDuet", name: "Claude Duet", kind: .cloud,
-        logoAsset: "ConnectorClaudeDuet", symbol: "bubble.left.and.bubble.right.fill", instructionID: "duet",
+        id: "claudeDuet",
+        name: "Claude Duet",
+        kind: .cloud,
+        logoAsset: "ConnectorClaudeDuet",
+        symbol: "bubble.left.and.bubble.right.fill",
+        instructionID: "duet",
         steps: "Add a custom connector in Claude Duet and paste the address. Approve once in iMCP.",
         aliases: ["duet"]
     )
     static let muse = KnownClient(
-        id: "muse", name: "Muse", kind: .cloud,
-        logoAsset: "ConnectorMuse", symbol: "sparkles", instructionID: "muse",
+        id: "muse",
+        name: "Muse",
+        kind: .cloud,
+        logoAsset: "ConnectorMuse",
+        symbol: "sparkles",
+        instructionID: "muse",
         steps: "Add a connector in Muse and paste the address. Sign in when it asks.",
         aliases: ["muse"]
     )
     static let gemini = KnownClient(
-        id: "gemini", name: "Gemini", kind: .cloud,
-        logoAsset: "ConnectorGemini", symbol: "sparkle", instructionID: "gemini",
+        id: "gemini",
+        name: "Gemini",
+        kind: .cloud,
+        logoAsset: "ConnectorGemini",
+        symbol: "sparkle",
+        instructionID: "gemini",
         steps: "Add a custom connector in Gemini and paste the address. Approve once in iMCP.",
         aliases: ["gemini"]
     )
