@@ -3,31 +3,74 @@ import ServiceManagement
 import Sparkle
 import SwiftUI
 
-/// The Settings window: a sidebar of tabs, and the tab that is selected.
+/// The Settings window: a sidebar with the app tabs and the Services section, and the pane that is selected.
 /// The window can be resized, and the sidebar can be collapsed.
 struct SettingsView: View {
     @ObservedObject var serverController: ServerController
     var isMenuBarExtraInserted: Bool
     var updater: SPUUpdater?
 
-    // Settings reopens to the tab that was open last.
-    @AppStorage("settingsPane") private var tab = SettingsTab.general
+    // Settings reopens to the pane that was open last.
+    @AppStorage("settingsPane") private var pane = SettingsPane.general
     @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
+        let configs = serverController.computedServiceConfigs
+        let selection = selection(in: configs)
+
         NavigationSplitView(columnVisibility: $columnVisibility) {
             List(
-                SettingsTab.allCases,
-                selection: Binding<SettingsTab?>(get: { tab }, set: { if let newTab = $0 { tab = newTab } })
-            ) { item in
-                Label(item.title, systemImage: item.symbol)
-                    .tag(item)
+                selection: Binding(
+                    get: { selection },
+                    set: { newValue in
+                        if let newValue { pane = newValue }
+                    }
+                )
+            ) {
+                ForEach(SettingsPane.tabs, id: \.self) { tab in
+                    Label(tab.title, systemImage: tab.symbol)
+                        .tag(tab)
+                }
+
+                Section("Services") {
+                    ForEach(configs) { config in
+                        Label {
+                            Text(config.name)
+                        } icon: {
+                            ServiceIcon(config: config, isOn: config.binding.wrappedValue)
+                        }
+                        .accessibilityValue(config.binding.wrappedValue ? "On" : "Off")
+                        .tag(SettingsPane.service(config.id))
+                    }
+                }
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 160, ideal: 190, max: 240)
+            .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
         } detail: {
-            detail
-                .background(SettingsWindowConfigurator())
+            Group {
+                switch selection {
+                case .general:
+                    GeneralSettingsView(
+                        serverController: serverController,
+                        isMenuBarExtraInserted: isMenuBarExtraInserted,
+                        updater: updater
+                    )
+                case .clients:
+                    ClientsSettingsView(serverController: serverController)
+                case .mobile:
+                    MobileSettingsView(serverController: serverController)
+                case .remoteAccess:
+                    RemoteAccessSettingsView(serverController: serverController)
+                case .advanced:
+                    AdvancedSettingsView(serverController: serverController)
+                case .service(let id):
+                    if let config = configs.first(where: { $0.id == id }) {
+                        ServiceSettingsView(serverController: serverController, config: config)
+                            // Each service starts at the top, with its own state.
+                            .id(id)
+                    }
+                }
+            }
+            .background(SettingsWindowConfigurator())
         }
         .frame(
             minWidth: SettingsWindowConfigurator.minimumSize.width,
@@ -37,26 +80,12 @@ struct SettingsView: View {
         )
     }
 
-    @ViewBuilder
-    private var detail: some View {
-        switch tab {
-        case .general:
-            GeneralSettingsView(
-                serverController: serverController,
-                isMenuBarExtraInserted: isMenuBarExtraInserted,
-                updater: updater
-            )
-        case .services:
-            ServicesSettingsView(serverController: serverController)
-        case .clients:
-            ClientsSettingsView(serverController: serverController)
-        case .mobile:
-            MobileSettingsView(serverController: serverController)
-        case .remoteAccess:
-            RemoteAccessSettingsView(serverController: serverController)
-        case .advanced:
-            AdvancedSettingsView(serverController: serverController)
+    /// The stored pane, or General if the stored pane is for a service that this build doesn't include.
+    private func selection(in configs: [ServiceConfig]) -> SettingsPane {
+        if case .service(let id) = pane, !configs.contains(where: { $0.id == id }) {
+            return .general
         }
+        return pane
     }
 }
 

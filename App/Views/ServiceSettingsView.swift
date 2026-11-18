@@ -3,93 +3,32 @@ import EventKit
 import ServiceManagement
 import SwiftUI
 
-/// The Services tab: every service with its switch. A row opens that service's own options.
-struct ServicesSettingsView: View {
-    @ObservedObject var serverController: ServerController
-    @State private var path: [String] = []
-
-    var body: some View {
-        let configs = serverController.computedServiceConfigs
-
-        NavigationStack(path: $path) {
-            Form {
-                Section {
-                    ForEach(configs) { config in
-                        row(config)
-                    }
-                }
-            }
-            .formStyle(.grouped)
-            .navigationTitle("Services")
-            .navigationDestination(for: String.self) { id in
-                if let config = configs.first(where: { $0.id == id }) {
-                    ServiceSettingsView(serverController: serverController, config: config)
-                }
-            }
-        }
-    }
-
-    private func row(_ config: ServiceConfig) -> some View {
-        HStack(spacing: 10) {
-            Button {
-                path.append(config.id)
-            } label: {
-                HStack(spacing: 10) {
-                    ServiceIcon(config: config, isOn: config.binding.wrappedValue, size: 28)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(config.name)
-                        Text(config.summary)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    Spacer(minLength: 8)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Toggle(
-                config.name,
-                isOn: Binding(
-                    get: { config.binding.wrappedValue },
-                    // Delegate to ServerController so toggling activates the service (permission
-                    // prompt, revert on failure) and pushes updated bindings to connected clients.
-                    set: { serverController.setService(config, enabled: $0) }
-                )
-            )
-            .labelsHidden()
-            .toggleStyle(.switch)
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
-        }
-        .accessibilityElement(children: .contain)
-    }
-}
-
-/// The options of one service: its switch, what it can change, and which of its tools clients can use.
+/// The Settings pane for one service:
+/// whether the service is on, and which of its tools clients can use.
 struct ServiceSettingsView: View {
     @ObservedObject var serverController: ServerController
     let config: ServiceConfig
-    @State private var isToolsExpanded = false
 
     var body: some View {
         let isOn = config.binding.wrappedValue
 
         Form {
             Section {
-                LabeledContent {
+                HStack(spacing: 12) {
+                    ServiceIcon(config: config, isOn: isOn, size: 40)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(config.name)
+                            .font(.headline)
+                        Text(config.summary)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    // A regular switch for the service and mini switches for its tools
+                    // show which setting the others depend on.
                     Toggle(config.name, isOn: serviceBinding)
                         .toggleStyle(.switch)
+                        .controlSize(.regular)
                         .labelsHidden()
-                } label: {
-                    RowLabel(title: config.name, subtitle: config.summary) {
-                        ServiceIcon(config: config, isOn: isOn, size: 32)
-                    }
                 }
             }
 
@@ -120,18 +59,8 @@ struct ServiceSettingsView: View {
                 PrivateRemindersSection()
             }
 
-            toolsSection(isOn: isOn)
-        }
-        .formStyle(.grouped)
-        .navigationTitle(config.name)
-    }
-
-    private func toolsSection(isOn: Bool) -> some View {
-        let tools = config.service.tools
-        let enabledCount = tools.filter { serverController.isToolEnabled($0.name) }.count
-        return Section {
-            DisclosureGroup(isExpanded: $isToolsExpanded) {
-                ForEach(tools, id: \.name) { tool in
+            Section {
+                ForEach(config.service.tools, id: \.name) { tool in
                     Toggle(isOn: toolBinding(tool.name)) {
                         HStack(spacing: 6) {
                             if let title = tool.annotations.title {
@@ -141,31 +70,50 @@ struct ServiceSettingsView: View {
                                 Text(tool.name)
                                     .monospaced()
                             }
+                            if tool.isWrite, !config.service.areWritesEnabled() {
+                                Text("Writes off")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                             if tool.annotations.readOnlyHint == true {
-                                StatusBadge(text: "Read-only")
-                            } else if tool.isWrite, !config.service.areWritesEnabled() {
-                                StatusBadge(text: "Writes off", kind: .attention)
+                                Text("Read-only")
+                                    .font(.caption2)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Capsule().fill(Color.secondary.opacity(0.15)))
+                                    .foregroundStyle(.secondary)
                             }
                         }
+                        Text(firstSentence(of: tool.description))
                     }
+                    .controlSize(.mini)
+                    .help(tool.description)
                     // While the service is off, its tools keep their own settings,
                     // but a disabled switch alone still looks on, so dim the whole row.
                     .disabled(!isOn)
                     .opacity(isOn ? 1 : 0.5)
                 }
-            } label: {
-                LabeledContent {
-                    Text("\(enabledCount) of \(tools.count) on")
-                        .foregroundStyle(.secondary)
-                } label: {
-                    RowLabel(title: "Tools") {
-                        SettingsIcon(symbol: "wrench.and.screwdriver.fill", color: .gray)
+            } header: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tools")
+                    if !isOn {
+                        Text("Clients can't use these tools while \(config.name) is off.")
+                            .font(.subheadline)
+                            .fontWeight(.regular)
+                            .foregroundStyle(.secondary)
                     }
                 }
+            } footer: {
+                Text("Clients can't see or call the tools that you turn off.")
             }
+            .animation(.default, value: isOn)
         }
+        .formStyle(.grouped)
+        .navigationTitle(config.name)
     }
 
+    // Delegate to ServerController so toggling activates the service (permission
+    // prompt, revert on failure) and pushes updated bindings to connected clients.
     private var serviceBinding: Binding<Bool> {
         Binding(
             get: { config.binding.wrappedValue },
@@ -179,26 +127,34 @@ struct ServiceSettingsView: View {
             set: { serverController.setTool(name, enabled: $0) }
         )
     }
+
+    /// The sentence that says what a tool does.
+    /// The rest of a tool's description tells clients how to call it,
+    /// so Settings shows it only in the tool's help tag.
+    private func firstSentence(of description: String) -> String {
+        var sentence = description
+        description.enumerateSubstrings(in: description.startIndex..., options: .bySentences) { substring, _, _, stop in
+            if let substring {
+                sentence = substring.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            stop = true
+        }
+        return sentence
+    }
 }
 
-/// The switch for the Reminders tools that use Apple's private ReminderKit framework.
+/// The switch for the Reminders tools that use Apple's private ReminderKit framework:
+/// tags, rich links, sections, subtasks, flags, list icons, groups, smart lists, and templates.
 private struct PrivateRemindersSection: View {
     @AppStorage(RemindersPrivate.settingKey) private var isEnabled = false
 
     var body: some View {
         Section {
-            Toggle(isOn: $isEnabled) {
-                RowLabel(title: "Private Reminders features", subtitle: "Tags, sections, subtasks, flags") {
-                    SettingsIcon(symbol: "checklist", color: .orange)
-                }
-            }
-            DisclosureGroup("Details") {
-                Text(
-                    "These use Apple's unsupported ReminderKit framework, which can change in any macOS update. Changes are saved through Reminders, never by editing its database. Off by default."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
+            Toggle("Private Reminders features", isOn: $isEnabled)
+        } footer: {
+            Text(
+                "Lets clients change tags, rich links, sections, subtasks, flags, list icons, groups, smart lists, and templates. These use Apple's unsupported ReminderKit framework, which can change in any macOS update. Changes are saved through Reminders, never by editing its database. Off by default."
+            )
         }
     }
 }
@@ -251,54 +207,45 @@ private struct WritesSection: View {
 
     var body: some View {
         Section {
-            Toggle(isOn: $isWriteEnabled) {
-                RowLabel(title: "Allow writes", subtitle: subtitle) {
-                    SettingsIcon(symbol: "pencil", color: .blue)
+            Toggle("Allow writes", isOn: $isWriteEnabled)
+                .disabled(approvalMode.bypassesServiceWriteToggles)
+                .onChange(of: isWriteEnabled) {
+                    // Redraw the tool list's "Writes off" labels, and tell clients to list the tools again.
+                    serverController.objectWillChange.send()
+                    serverController.toolListChanged()
                 }
-            }
-            .disabled(approvalMode.bypassesServiceWriteToggles)
-            .onChange(of: isWriteEnabled) {
-                // Redraw the tool list's "Writes off" labels, and tell clients to list the tools again.
-                serverController.objectWillChange.send()
-                serverController.toolListChanged()
-            }
-            if service is NotesService {
-                DisclosureGroup("Details") {
-                    Text(
-                        "Clients can create, edit, move, and delete notes and folders. Deleted notes go to Recently Deleted. An edit is refused if the note changed since the client read it. The first time, macOS asks whether iMCP may control Notes."
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                }
-            }
+        } footer: {
+            Text(footer)
         }
     }
 
-    private var subtitle: String {
-        approvalMode.bypassesServiceWriteToggles
-            ? "Always on in this approval mode"
-            : "Create, change and delete in \(name)"
+    private var footer: String {
+        if approvalMode.bypassesServiceWriteToggles {
+            return
+                "Writes are allowed across all services while Approval Mode is set to \"\(approvalMode.title)\" in General settings."
+        }
+        var text =
+            "Lets clients create, change, and delete things in \(name). Tools that only read are always available."
+        if service is NotesService {
+            text +=
+                " In Notes they can create, edit, move, and delete notes and folders. Deleted notes go to Recently Deleted. An edit replaces a note's text and is refused if the note changed since the client read it. The first time, macOS asks whether iMCP may control Notes."
+        }
+        return text
     }
 }
 
-/// The switch for the Notes tools that use Apple's private NotesShared framework.
+/// The switch for the Notes tools that use Apple's private NotesShared framework:
+/// native tags, checklists, tables, pinning, note links, rich append, and Markdown notes.
 private struct PrivateNotesSection: View {
     @AppStorage(NotesPrivate.settingKey) private var isEnabled = false
 
     var body: some View {
         Section {
-            Toggle(isOn: $isEnabled) {
-                RowLabel(title: "Private Notes features", subtitle: "Tags, checklists, tables, pins") {
-                    SettingsIcon(symbol: "note.text", color: .yellow)
-                }
-            }
-            DisclosureGroup("Details") {
-                Text(
-                    "These use Apple's unsupported NotesShared framework, which can change in any macOS update. They need Allow writes. Changes are saved through Notes' own code, never by editing its database. Off by default."
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            }
+            Toggle("Private Notes features", isOn: $isEnabled)
+        } footer: {
+            Text(
+                "Lets clients read and change native tags, checklists, tables, pins, links between notes, and Markdown notes. These use Apple's unsupported NotesShared framework, which can change in any macOS update, and need the Notes folder access above. Changes also need \"Allow writes\". Saved through Notes' own code, never by editing its database. Off by default."
+            )
         }
     }
 }
@@ -311,26 +258,28 @@ private struct FilesFoldersSection: View {
     var body: some View {
         Section {
             if folders.isEmpty {
-                EmptyRow(symbol: "folder.badge.plus", text: "No folders shared")
+                Text("No folders are shared. Clients can't see any files until you add one.")
+                    .foregroundStyle(.secondary)
             }
             ForEach(folders, id: \.id) { folder in
-                LabeledContent {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(folder.status.name)
+                        Text(folder.status.path ?? "Can't be opened")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if folder.status.state == .needsReAdd {
+                            Text("Remove this folder and add it again.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    Spacer()
                     Button("Remove", role: .destructive) {
                         FilesRootStore.shared.remove(folder.id)
                         reload()
-                    }
-                } label: {
-                    RowLabel(
-                        title: folder.status.name,
-                        subtitle: folder.status.state == .needsReAdd
-                            ? "Remove and add it again"
-                            : (folder.status.path ?? "Can't be opened")
-                    ) {
-                        SettingsIcon(
-                            symbol: folder.status.state == .needsReAdd
-                                ? "exclamationmark.triangle.fill" : "folder.fill",
-                            color: folder.status.state == .needsReAdd ? .orange : .blue
-                        )
                     }
                 }
             }
@@ -341,9 +290,11 @@ private struct FilesFoldersSection: View {
                     .foregroundStyle(.red)
             }
         } header: {
-            SectionTitle(title: "Shared folders", symbol: "folder")
+            Text("Shared Folders")
         } footer: {
-            Text("Clients can only see these folders.")
+            Text(
+                "Clients can read and search these folders and everything inside them, and nothing else. Remove a folder to stop sharing it. iMCP never opens a Photos library."
+            )
         }
         .task { reload() }
     }
@@ -383,25 +334,28 @@ private struct HomeHelperSection: View {
     var body: some View {
         Section {
             LabeledContent {
-                HStack(spacing: 8) {
-                    StatusBadge(text: badgeText, kind: badgeKind)
-                    switch state {
-                    case .notBundled:
-                        EmptyView()
-                    case .notRegistered:
-                        Button("Register") { register() }
-                            .disabled(isWorking)
-                    case .needsApproval:
-                        Button("Open Login Items…") { SMAppService.openSystemSettingsLoginItems() }
-                    case .registered:
-                        Button("Unregister…") { isConfirmingUnregister = true }
-                            .disabled(isWorking)
-                    }
+                switch state {
+                case .notBundled:
+                    EmptyView()
+                case .notRegistered:
+                    Button("Register") { register() }
+                        .disabled(isWorking)
+                case .needsApproval:
+                    Button("Open Login Items…") { SMAppService.openSystemSettingsLoginItems() }
+                case .registered:
+                    Button("Unregister…") { isConfirmingUnregister = true }
+                        .disabled(isWorking)
                 }
             } label: {
-                RowLabel(title: "iMCP Helper", subtitle: errorMessage ?? note) {
-                    SettingsIcon(symbol: "house.fill", color: .orange)
-                }
+                Text("iMCP Helper")
+                Text(description)
+            }
+        } footer: {
+            if let errorMessage {
+                Text(errorMessage)
+                    .foregroundStyle(.red)
+            } else if state == .notBundled {
+                Text("This build of iMCP doesn't include iMCP Helper, which Home needs to reach HomeKit.")
             }
         }
         .confirmationDialog("Unregister iMCP Helper?", isPresented: $isConfirmingUnregister) {
@@ -420,7 +374,7 @@ private struct HomeHelperSection: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Home tools stop working until you register it again.")
+            Text("iMCP Helper stops, and Home tools stop working until you register it again or turn Home on.")
         }
         .task {
             state = HomeService.shared.state()
@@ -428,29 +382,12 @@ private struct HomeHelperSection: View {
         }
     }
 
-    private var badgeText: String {
+    private var description: String {
         switch state {
-        case .notBundled: "Not included"
-        case .notRegistered: "Off"
-        case .needsApproval: "Needs approval"
-        case .registered: "Registered"
-        }
-    }
-
-    private var badgeKind: StatusBadge.Kind {
-        switch state {
-        case .notBundled, .notRegistered: .neutral
-        case .needsApproval: .attention
-        case .registered: .good
-        }
-    }
-
-    /// One line for the states that need an explanation.
-    private var note: String? {
-        switch state {
-        case .notBundled: "Home needs it to reach HomeKit"
-        case .needsApproval: "Approve it in Login Items"
-        default: nil
+        case .notBundled: "Not included in this build"
+        case .notRegistered: "Not registered"
+        case .needsApproval: "Waiting for your approval in Login Items"
+        case .registered: "Registered. macOS starts it when iMCP needs HomeKit."
         }
     }
 
@@ -482,26 +419,15 @@ private struct CalendarSelectionSection: View {
     var body: some View {
         Group {
             Section {
-                Toggle(isOn: showsNewCalendars) {
-                    RowLabel(title: "Include new calendars") {
-                        SettingsIcon(symbol: "calendar.badge.plus", color: .red)
-                    }
-                }
-            } header: {
-                SectionTitle(title: "Calendars clients can see", symbol: "calendar")
+                Toggle("Show new calendars automatically", isOn: showsNewCalendars)
+            } footer: {
+                Text("Clients can only see and change events in the calendars that you choose.")
             }
 
             ForEach(accounts, id: \.source) { account in
                 Section(account.source) {
                     ForEach(account.calendars, id: \.calendarIdentifier) { calendar in
-                        Toggle(isOn: binding(for: calendar)) {
-                            Label {
-                                Text(calendar.title)
-                            } icon: {
-                                Image(systemName: "circle.fill")
-                                    .foregroundStyle(Color(nsColor: calendar.color ?? .gray))
-                            }
-                        }
+                        Toggle(calendar.title, isOn: binding(for: calendar))
                     }
                 }
             }
