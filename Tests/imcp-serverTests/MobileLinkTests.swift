@@ -668,6 +668,8 @@ final class MobileRetryTests: XCTestCase {
         await service.attach(hung)
         let attached = await service.attach(fresh)
         XCTAssertTrue(attached)
+        // The old link is closed on its own task, so wait for it instead of reading the count at once.
+        for _ in 0 ..< 100 where hung.closeCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(hung.closeCount, 1)
         await service.stop()
     }
