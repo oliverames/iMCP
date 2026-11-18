@@ -31,7 +31,7 @@ struct ClientsSettingsView: View {
                     ExpandableRow(isExpanded: expansion(of: "connectorAddress")) {
                         HStack {
                             RowLabel(title: "Connector address", subtitle: publicURL) {
-                                SettingsIcon(symbol: "link", color: .teal)
+                                SettingsIcon(symbol: "link", color: .teal, size: 32)
                             }
                             Spacer(minLength: 8)
                             Button("Copy") { copyToSettingsPasteboard(publicURL) }
@@ -48,7 +48,7 @@ struct ClientsSettingsView: View {
                         Button("Open Remote Access") { tab = .remoteAccess }
                     } label: {
                         RowLabel(title: "Cloud apps need a public address") {
-                            SettingsIcon(symbol: "network", color: .orange)
+                            SettingsIcon(symbol: "network", color: .orange, size: 32)
                         }
                     }
                 }

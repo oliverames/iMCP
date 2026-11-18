@@ -6,7 +6,7 @@ import SwiftUI
 /// Cloudflare: paste an API token instead of signing in with the browser.
 struct CloudflareTokenEntry: View {
     @ObservedObject var cloudflare: CloudflareTunnelController
-    /// Plain bordered buttons for Settings, instead of the Setup Assistant's glass.
+    /// In Settings, buttons are plain bordered ones; the Setup Assistant uses its glass buttons.
     var compact = false
     @Environment(\.openURL) private var openURL
 
@@ -105,6 +105,7 @@ struct TailscaleAutoEnable: View {
     @ObservedObject var access: TailscaleAccessController
     /// The Tailscale address of this Mac. Nil until the node is online.
     let target: String?
+    var compact = false
     @Environment(\.openURL) private var openURL
 
     @State private var isOpen = false
@@ -163,7 +164,7 @@ struct TailscaleAutoEnable: View {
             if access.hasCredential {
                 HStack {
                     Button("Review the Change") { Task { await access.prepare(target: target) } }
-                        .onboardingSecondary()
+                        .checklistButton(compact: compact)
                     Button("Remove Token") { access.removeCredential() }
                         .buttonStyle(.link)
                         .font(.caption)
@@ -177,7 +178,7 @@ struct TailscaleAutoEnable: View {
                     credential = ""
                     Task { await access.useCredential(pasted, target: target) }
                 }
-                .onboardingSecondary()
+                .checklistButton(compact: compact)
                 .disabled(credential.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if case .failed(let reason) = access.phase {
@@ -207,7 +208,7 @@ struct TailscaleAutoEnable: View {
             .font(.caption)
             HStack {
                 Button("Allow Public Addresses") { Task { await access.confirm() } }
-                    .onboardingSecondary()
+                    .checklistButton(compact: compact)
                     .accessibilityIdentifier("onboarding.tailscale.confirm")
                 Button("Cancel") { access.cancelReview() }
                     .buttonStyle(.link)
