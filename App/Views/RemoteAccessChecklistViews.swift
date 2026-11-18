@@ -327,7 +327,7 @@ private struct StepRow: View {
         HStack(alignment: .top, spacing: 10) {
             Group {
                 if item.status == .waiting {
-                    ProgressView().controlSize(.small).frame(width: 28, height: 28)
+                    ProgressView().controlSize(.small).frame(width: 32, height: 32)
                 } else {
                     SettingsIcon(symbol: ChecklistTitles.symbol(for: item.kind), color: tint)
                 }

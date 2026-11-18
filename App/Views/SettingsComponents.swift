@@ -8,7 +8,7 @@ import SwiftUI
 struct SettingsIcon: View {
     let symbol: String
     var color: Color = .accentColor
-    var size: CGFloat = 28
+    var size: CGFloat = 32
 
     var body: some View {
         Image(systemName: symbol)
@@ -44,7 +44,7 @@ struct ClientLogo: View {
 /// The logo of the client that a name belongs to, or `fallback` for any other client.
 struct ClientIdentityIcon<Fallback: View>: View {
     let name: String
-    var size: CGFloat = 28
+    var size: CGFloat = 32
     @ViewBuilder var fallback: () -> Fallback
 
     var body: some View {

@@ -19,11 +19,11 @@ struct TrustedAppRow: View {
         } label: {
             RowLabel(title: client.name, subtitle: lastConnection) {
                 if let known = KnownClient.match(name: client.name) {
-                    ClientLogo(client: known, size: 28)
+                    ClientLogo(client: known)
                 } else if let path = client.bundlePath {
                     Image(nsImage: NSWorkspace.shared.icon(forFile: path))
                         .resizable()
-                        .frame(width: 28, height: 28)
+                        .frame(width: 32, height: 32)
                         .accessibilityHidden(true)
                 } else {
                     SettingsIcon(symbol: "terminal.fill", color: .gray)
