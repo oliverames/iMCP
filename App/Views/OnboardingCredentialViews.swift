@@ -6,6 +6,8 @@ import SwiftUI
 /// Cloudflare: paste an API token instead of signing in with the browser.
 struct CloudflareTokenEntry: View {
     @ObservedObject var cloudflare: CloudflareTunnelController
+    /// Plain bordered buttons for Settings, instead of the Setup Assistant's glass.
+    var compact = false
     @Environment(\.openURL) private var openURL
 
     @State private var isOpen = false
@@ -33,7 +35,7 @@ struct CloudflareTokenEntry: View {
                 }
             } else {
                 Button(isOpen ? "Hide API Token" : "Use an API Token") { isOpen.toggle() }
-                    .onboardingSecondary()
+                    .checklistButton(compact: compact)
                     .accessibilityIdentifier("onboarding.cloudflare.useToken")
                 if isOpen { entry }
             }
@@ -62,7 +64,7 @@ struct CloudflareTokenEntry: View {
 
             HStack {
                 Button("Check and Use Token") { Task { await checkAndUse() } }
-                    .onboardingSecondary()
+                    .checklistButton(compact: compact)
                     .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty || isWorking)
                     .accessibilityIdentifier("onboarding.cloudflare.checkToken")
                 if isWorking { ProgressView().controlSize(.small) }

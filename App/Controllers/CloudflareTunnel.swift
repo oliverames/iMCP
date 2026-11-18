@@ -1522,3 +1522,31 @@ final class CloudflareTunnelController: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+    extension CloudflareTunnelController {
+        /// Screenshots only: shows a state without touching Cloudflare or any real account.
+        func debugShow(_ scenario: String) {
+            switch scenario {
+            case "connected":
+                account = CloudflareAccount(accountID: "account", zoneID: "zone", apiToken: "not-a-real-token")
+                zones = [
+                    CloudflareZone(
+                        id: "zone",
+                        name: "example.com",
+                        status: "active",
+                        account: .init(id: "account", name: nil)
+                    )
+                ]
+                selectedZoneID = "zone"
+                hostnameDraft = "imcp.example.com"
+                configuredHostname = "imcp.example.com"
+                state = .connected(url: "https://imcp.example.com/mcp", tunnelName: "imcp-mac", tunnelID: "tunnel")
+            default:
+                account = nil
+                zones = []
+                state = .off
+            }
+        }
+    }
+#endif

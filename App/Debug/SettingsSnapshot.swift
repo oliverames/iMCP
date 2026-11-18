@@ -27,13 +27,16 @@
                     "service-NotesService", "service-CalendarService",
                 ]
             if let tab = arguments.first(where: { $0.hasPrefix("--settings-tab=") }) {
-                tabs = [String(tab.dropFirst("--settings-tab=".count))]
+                tabs = String(tab.dropFirst("--settings-tab=".count)).split(separator: ",").map(String.init)
             }
             var sizes: [(String, NSSize)] = [
                 ("default", SettingsWindowMetrics.defaultSize),
                 ("min", SettingsWindowMetrics.minimumSize),
                 ("large", NSSize(width: 1100, height: 800)),
             ]
+            if arguments.contains("--settings-default-and-min") {
+                sizes = Array(sizes.prefix(2))
+            }
             if let size = arguments.first(where: { $0.hasPrefix("--settings-size=") }) {
                 let parts = String(size.dropFirst("--settings-size=".count)).split(separator: "x").compactMap {
                     Double($0)
@@ -134,7 +137,14 @@
                 var pane = tab.hasPrefix("service-") ? String(tab.dropFirst("service-".count)) : tab
                 // "remoteAccess-cloudflare" shows that way's checklist.
                 UserDefaults.standard.removeObject(forKey: "debugRemoteSelection")
-                if pane.hasPrefix("remoteAccess-") {
+                UserDefaults.standard.removeObject(forKey: "debugChecklistExpanded")
+                if pane.hasPrefix("remoteAccess-cloudflare") {
+                    // "remoteAccess-cloudflare-connected", "-connected-details" or "-signedout".
+                    UserDefaults.standard.set("cloudflare", forKey: "debugRemoteSelection")
+                    UserDefaults.standard.set(pane.contains("details"), forKey: "debugChecklistExpanded")
+                    serverController.cloudflareTunnel.debugShow(pane.contains("connected") ? "connected" : "signedout")
+                    pane = "remoteAccess"
+                } else if pane.hasPrefix("remoteAccess-") {
                     UserDefaults.standard.set(
                         String(pane.dropFirst("remoteAccess-".count)),
                         forKey: "debugRemoteSelection"
