@@ -38,7 +38,7 @@ struct MobileSettingsView: View {
                     Text(error).font(.caption).foregroundStyle(.red)
                 }
             } header: {
-                SectionTitle(title: "Devices", symbol: "iphone")
+                Text("Devices")
             }
 
             Section {
@@ -59,7 +59,7 @@ struct MobileSettingsView: View {
                     saveRouteOrder(order)
                 }
             } header: {
-                SectionTitle(title: "Routes", symbol: "arrow.triangle.branch")
+                Text("Routes")
             } footer: {
                 Text("AI apps and your phone try these in order.")
             }

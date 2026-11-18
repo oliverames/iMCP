@@ -46,7 +46,7 @@ struct RemoteAccessSettingsView: View {
                 }
                 .pickerStyle(.menu)
             } header: {
-                SectionTitle(title: "Access", symbol: "network")
+                Text("Access")
             }
 
             switch selection {
@@ -68,7 +68,7 @@ struct RemoteAccessSettingsView: View {
                         }
                     }
                 } header: {
-                    SectionTitle(title: "Public address", symbol: "globe")
+                    Text("Public address")
                 }
             }
         }
@@ -76,6 +76,14 @@ struct RemoteAccessSettingsView: View {
         .navigationTitle("Remote Access")
         .onAppear {
             remote.reset(mode: .finishSetup)
+            #if DEBUG
+                // Screenshots show a way's checklist without turning anything on.
+                if let raw = UserDefaults.standard.string(forKey: "debugRemoteSelection"),
+                    let choice = RemoteChoice.allCases.first(where: { String(describing: $0) == raw })
+                {
+                    remote.remoteSelection = choice
+                }
+            #endif
             cloudflare.refreshEnvironment()
         }
         .onDisappear { remote.windowWillClose() }
@@ -104,13 +112,6 @@ struct RemoteAccessSettingsView: View {
 
     private func tailscaleSection(_ choice: RemoteChoice) -> some View {
         Section {
-            LabeledContent {
-                tailscaleBadge(serverController.remoteAccessState)
-            } label: {
-                RowLabel(title: "Status") {
-                    SettingsIcon(symbol: choice.settingsSymbol, color: .gray)
-                }
-            }
             TailscaleChecklistView(
                 inputs: remote.tailscaleInputs,
                 openTailscalePage: remote.openTailscalePage,
@@ -127,20 +128,7 @@ struct RemoteAccessSettingsView: View {
                 Button("Log Out of Tailscale…", role: .destructive) { isConfirmingTailscaleLogOut = true }
             }
         } header: {
-            SectionTitle(title: choice.summaryName, symbol: "checklist")
-        }
-    }
-
-    @ViewBuilder
-    private func tailscaleBadge(_ state: RemoteAccessServer.State) -> some View {
-        switch state {
-        case .off: StatusBadge(text: "Off")
-        case .starting: StatusBadge(text: "Connecting")
-        case .needsLogin: StatusBadge(text: "Sign-in needed", kind: .attention)
-        case .needsApproval: StatusBadge(text: "Needs approval", kind: .attention)
-        case .loggingOut: StatusBadge(text: "Logging out")
-        case .failed: StatusBadge(text: "Problem", kind: .bad)
-        case .running: StatusBadge(text: "On", kind: .good, symbol: "checkmark")
+            Text(choice.summaryName)
         }
     }
 
@@ -148,13 +136,6 @@ struct RemoteAccessSettingsView: View {
 
     private var cloudflareSection: some View {
         Section {
-            LabeledContent {
-                cloudflareBadge(cloudflare.state)
-            } label: {
-                RowLabel(title: "Status") {
-                    SettingsIcon(symbol: "cloud", color: .gray)
-                }
-            }
             CloudflareChecklistView(cloudflare: cloudflare, compact: true)
 
             if cloudflare.account == nil {
@@ -169,20 +150,7 @@ struct RemoteAccessSettingsView: View {
                 Button("Log Out of Cloudflare…", role: .destructive) { isConfirmingCloudflareLogOut = true }
             }
         } header: {
-            SectionTitle(title: "Cloudflare Tunnel", symbol: "checklist")
-        }
-    }
-
-    @ViewBuilder
-    private func cloudflareBadge(_ state: CloudflareTunnelController.State) -> some View {
-        switch state {
-        case .off: StatusBadge(text: "Not signed in")
-        case .loggingIn: StatusBadge(text: "Waiting for sign-in")
-        case .discoveringZones: StatusBadge(text: "Finding domains")
-        case .ready: StatusBadge(text: "Ready")
-        case .provisioning: StatusBadge(text: "Setting up")
-        case .connected: StatusBadge(text: "Connected", kind: .good, symbol: "checkmark")
-        case .failed: StatusBadge(text: "Problem", kind: .bad)
+            Text("Cloudflare Tunnel")
         }
     }
 

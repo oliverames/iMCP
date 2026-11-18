@@ -47,7 +47,7 @@ struct AdvancedSettingsView: View {
                     }
                 }
             } header: {
-                SectionTitle(title: "Developer", symbol: "hammer")
+                Text("Developer")
             }
 
             MobileDetailsSection()
@@ -145,7 +145,7 @@ struct AdvancedSettingsView: View {
                 Button("Create Token…") { editingToken = EditingToken(token: nil) }
                     .disabled(storageError != nil)
             } header: {
-                SectionTitle(title: "Access tokens", symbol: "key")
+                Text("Access tokens")
             }
         }
         .formStyle(.grouped)
@@ -279,7 +279,7 @@ struct AdvancedSettingsView: View {
                 }
             }
         } header: {
-            SectionTitle(title: "Tailscale", symbol: "lock.shield")
+            Text("Tailscale")
         }
     }
 
@@ -370,7 +370,7 @@ private struct MobileDetailsSection: View {
                 }
             }
         } header: {
-            SectionTitle(title: "iPhone and iPad", symbol: "ipad.and.iphone")
+            Text("iPhone and iPad")
         }
         .task {
             while !Task.isCancelled {

@@ -33,16 +33,22 @@ struct TailscaleChecklistView: View {
     var compact = false
     @Environment(\.openURL) private var openURL
 
+    private func open(_ item: ChecklistItem, _ url: URL) {
+        if item.kind == .signedIn { openURL(url) } else { openTailscalePage(url) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(TailscaleChecklist.items(inputs)) { item in
-                ChecklistRow(
-                    title: ChecklistTitles.title(for: item.kind),
-                    item: item,
-                    openLink: { url in
-                        if item.kind == .signedIn { openURL(url) } else { openTailscalePage(url) }
-                    }
-                )
+            if compact {
+                CompactChecklist(items: TailscaleChecklist.items(inputs), openLink: open) { _ in EmptyView() }
+            } else {
+                ForEach(TailscaleChecklist.items(inputs)) { item in
+                    ChecklistRow(
+                        title: ChecklistTitles.title(for: item.kind),
+                        item: item,
+                        openLink: { url in open(item, url) }
+                    )
+                }
             }
             if case .needsLogin(nil) = inputs.node {
                 Button("Get Sign-In Link", action: getSignInLink)
@@ -58,6 +64,27 @@ struct CloudflareChecklistView: View {
     var compact = false
     @Environment(\.openURL) private var openURL
 
+    /// The ways to sign in, under the sign-in line.
+    private var signInControls: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Button("Sign In with Browser") {
+                    Task { await cloudflare.logInWithBrowser() }
+                }
+                .checklistButton(compact: compact)
+                .disabled(!cloudflare.isBinaryAvailable || cloudflare.state == .loggingIn)
+                if cloudflare.detectedCertURL != nil {
+                    Button("Use Account on This Mac") {
+                        Task { await cloudflare.useDetectedCert() }
+                    }
+                    .checklistButton(compact: compact)
+                }
+            }
+            CloudflareTokenEntry(cloudflare: cloudflare)
+        }
+        .padding(.leading, 28)
+    }
+
     var body: some View {
         let inputs = CloudflareChecklist.Inputs(
             isSignedIn: cloudflare.account != nil,
@@ -69,43 +96,51 @@ struct CloudflareChecklistView: View {
         let items = CloudflareChecklist.items(inputs)
 
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(items) { item in
-                ChecklistRow(title: ChecklistTitles.title(for: item.kind), item: item, openLink: { openURL($0) })
-                if item.kind == .signIn, cloudflare.account == nil {
-                    HStack {
-                        Button("Sign In with Browser") {
-                            Task { await cloudflare.logInWithBrowser() }
-                        }
-                        .checklistButton(compact: compact)
-                        .disabled(!cloudflare.isBinaryAvailable || cloudflare.state == .loggingIn)
-                        if cloudflare.detectedCertURL != nil {
-                            Button("Use Account on This Mac") {
-                                Task { await cloudflare.useDetectedCert() }
-                            }
-                            .checklistButton(compact: compact)
+            if compact {
+                CompactChecklist(items: items, openLink: { _, url in openURL(url) }) { item in
+                    if item.kind == .signIn, cloudflare.account == nil {
+                        signInControls
+                    }
+                }
+                if cloudflare.account != nil {
+                    if cloudflare.zones.count > 1 {
+                        Picker("Domain", selection: $cloudflare.selectedZoneID) {
+                            ForEach(cloudflare.zones) { zone in Text(zone.name).tag(zone.id) }
                         }
                     }
-                    .padding(.leading, 28)
+                    LabeledContent("Hostname") {
+                        TextField(
+                            "Hostname",
+                            text: $cloudflare.hostnameDraft,
+                            prompt: Text("imcp.\(cloudflare.selectedZone?.name ?? "example.com")")
+                        )
+                        .labelsHidden()
+                        .multilineTextAlignment(.trailing)
+                        .accessibilityIdentifier("onboarding.cloudflare.hostname")
+                    }
                 }
-                if item.kind == .signIn {
-                    CloudflareTokenEntry(cloudflare: cloudflare)
+            } else {
+                ForEach(items) { item in
+                    ChecklistRow(title: ChecklistTitles.title(for: item.kind), item: item, openLink: { openURL($0) })
+                    if item.kind == .signIn, cloudflare.account == nil {
+                        signInControls
+                    }
+                    if item.kind == .domain, cloudflare.zones.count > 1 {
+                        Picker("Domain", selection: $cloudflare.selectedZoneID) {
+                            ForEach(cloudflare.zones) { zone in Text(zone.name).tag(zone.id) }
+                        }
                         .padding(.leading, 28)
-                }
-                if item.kind == .domain, cloudflare.zones.count > 1 {
-                    Picker("Domain", selection: $cloudflare.selectedZoneID) {
-                        ForEach(cloudflare.zones) { zone in Text(zone.name).tag(zone.id) }
                     }
-                    .padding(.leading, 28)
-                }
-                if item.kind == .hostname, cloudflare.account != nil {
-                    TextField(
-                        "Hostname",
-                        text: $cloudflare.hostnameDraft,
-                        prompt: Text("imcp.\(cloudflare.selectedZone?.name ?? "example.com")")
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .padding(.leading, 28)
-                    .accessibilityIdentifier("onboarding.cloudflare.hostname")
+                    if item.kind == .hostname, cloudflare.account != nil {
+                        TextField(
+                            "Hostname",
+                            text: $cloudflare.hostnameDraft,
+                            prompt: Text("imcp.\(cloudflare.selectedZone?.name ?? "example.com")")
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.leading, 28)
+                        .accessibilityIdentifier("onboarding.cloudflare.hostname")
+                    }
                 }
             }
 
@@ -164,6 +199,8 @@ struct ChecklistRow: View {
     let title: String
     let item: ChecklistItem
     let openLink: (URL) -> Void
+    /// One line for a finished item, with its reason only when something is left to do.
+    var compact = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -172,7 +209,7 @@ struct ChecklistRow: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline.weight(.medium))
-                if let detail = item.detail {
+                if let detail = item.detail, !(compact && item.isDone) {
                     Text(detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -208,6 +245,54 @@ struct ChecklistRow: View {
             Image(systemName: "circle").foregroundStyle(.secondary)
         case .needsAction:
             Image(systemName: "exclamationmark.circle.fill").foregroundStyle(.orange)
+        }
+    }
+}
+
+/// A checklist for Settings: the lines that still need something, one each, and the finished lines
+/// folded under one "All set" or "n done" line that opens to their details.
+struct CompactChecklist<Inline: View>: View {
+    let items: [ChecklistItem]
+    let openLink: (ChecklistItem, URL) -> Void
+    /// Controls that belong under a line that is not done yet.
+    @ViewBuilder var inline: (ChecklistItem) -> Inline
+
+    var body: some View {
+        let todo = items.filter { !$0.isDone }
+        let done = items.filter(\.isDone)
+
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(todo) { item in
+                ChecklistRow(
+                    title: ChecklistTitles.title(for: item.kind),
+                    item: item,
+                    openLink: { openLink(item, $0) },
+                    compact: true
+                )
+                inline(item)
+            }
+            if !done.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(done) { item in
+                            ChecklistRow(
+                                title: ChecklistTitles.title(for: item.kind),
+                                item: item,
+                                openLink: { openLink(item, $0) }
+                            )
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    if todo.isEmpty {
+                        Label("All set", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else {
+                        Text("\(done.count) done")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
         }
     }
 }

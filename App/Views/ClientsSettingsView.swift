@@ -45,7 +45,7 @@ struct ClientsSettingsView: View {
                     }
                 }
             } header: {
-                SectionTitle(title: "AI apps", symbol: "sparkles")
+                Text("AI apps")
             }
 
             Section {
@@ -72,7 +72,7 @@ struct ClientsSettingsView: View {
                     Button("Remove All…", role: .destructive) { isConfirmingRemoveAll = true }
                 }
             } header: {
-                SectionTitle(title: "Trusted", symbol: "checkmark.seal")
+                Text("Trusted")
             }
 
             if !oauthConnections.grants.isEmpty || oauthConnections.storageError != nil {
@@ -228,7 +228,7 @@ struct ConnectedOAuthAppsSection: View {
                 }
             }
         } header: {
-            SectionTitle(title: "Connected cloud apps", symbol: "cloud")
+            Text("Connected cloud apps")
         }
         .confirmationDialog(
             "Revoke “\(appToRevoke?.clientName ?? "")”?",
