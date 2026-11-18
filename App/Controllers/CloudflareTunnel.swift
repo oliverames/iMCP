@@ -1542,6 +1542,12 @@ final class CloudflareTunnelController: ObservableObject {
                 hostnameDraft = "imcp.example.com"
                 configuredHostname = "imcp.example.com"
                 state = .connected(url: "https://imcp.example.com/mcp", tunnelName: "imcp-mac", tunnelID: "tunnel")
+            case "missingdomain":
+                // Signed in, but the account has no active domain.
+                account = CloudflareAccount(accountID: "account", zoneID: nil, apiToken: "not-a-real-token")
+                zones = []
+                hostnameDraft = ""
+                state = .ready
             default:
                 account = nil
                 zones = []

@@ -717,7 +717,8 @@ final class ServerController: ObservableObject {
     }
 
     private func applyRemoteAccessConfiguration() {
-        let mobileVPNEnabled = UserDefaults.standard.object(forKey: MobileService.tailscaleVPNEnabledKey) as? Bool ?? true
+        let mobileVPNEnabled =
+            UserDefaults.standard.object(forKey: MobileService.tailscaleVPNEnabledKey) as? Bool ?? true
         let storedMobilePort = UserDefaults.standard.integer(forKey: MobileService.remotePortKey)
         let mobilePort: UInt16? =
             mobileVPNEnabled
@@ -2217,3 +2218,23 @@ actor ServerNetworkManager {
         }
     }
 }
+
+#if DEBUG
+    extension ServerController {
+        /// Screenshots only: shows a Tailscale state without starting the node or joining any network.
+        func debugShowTailscale(_ scenario: String) {
+            switch scenario {
+            case "connected":
+                remoteAccessState = .running(
+                    RemoteAccessServer.Endpoint(
+                        url: "http://imcp-mac.example.ts.net:4627/mcp",
+                        dnsName: "imcp-mac.example.ts.net",
+                        ipv4Address: "100.64.0.2"
+                    )
+                )
+            default:
+                remoteAccessState = .needsLogin(URL(string: "https://login.tailscale.com/a/example"))
+            }
+        }
+    }
+#endif

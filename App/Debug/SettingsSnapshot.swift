@@ -139,10 +139,15 @@
                 UserDefaults.standard.removeObject(forKey: "debugRemoteSelection")
                 UserDefaults.standard.removeObject(forKey: "debugChecklistExpanded")
                 if pane.hasPrefix("remoteAccess-cloudflare") {
-                    // "remoteAccess-cloudflare-connected", "-connected-details" or "-signedout".
+                    // "remoteAccess-cloudflare-connected", "-signedout" or "-missingdomain".
                     UserDefaults.standard.set("cloudflare", forKey: "debugRemoteSelection")
-                    UserDefaults.standard.set(pane.contains("details"), forKey: "debugChecklistExpanded")
-                    serverController.cloudflareTunnel.debugShow(pane.contains("connected") ? "connected" : "signedout")
+                    let scenario = pane.split(separator: "-").last.map(String.init) ?? "signedout"
+                    serverController.cloudflareTunnel.debugShow(scenario)
+                    pane = "remoteAccess"
+                } else if pane.hasPrefix("remoteAccess-tailscale") {
+                    // "remoteAccess-tailscale-connected" or "-signedout".
+                    UserDefaults.standard.set("tailscale", forKey: "debugRemoteSelection")
+                    serverController.debugShowTailscale(pane.hasSuffix("connected") ? "connected" : "signedout")
                     pane = "remoteAccess"
                 } else if pane.hasPrefix("remoteAccess-") {
                     UserDefaults.standard.set(
@@ -160,6 +165,7 @@
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
+            SettingsWindowController.clearInitialFocus(in: window)
             try? await Task.sleep(for: .seconds(2.5))
             window.contentView?.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
