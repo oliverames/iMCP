@@ -1,120 +1,6 @@
-import AppKit
 import SwiftUI
 
-/// How AI apps reach this Mac: the selected way, and the live state of its checklist.
-/// The Setup Assistant and the Remote Access tab in Settings share it.
-@MainActor
-final class RemoteAccessCoordinator: ObservableObject {
-    let serverController: ServerController
-
-    /// The way that is selected. Cloudflare can be selected before it is set up.
-    @Published var selection: RemoteChoice
-    /// The person opened a Tailscale page, and iMCP is re-checking until the permission shows up.
-    @Published private(set) var isWaitingForTailscale = false
-    private var tailscaleTask: Task<Void, Never>?
-
-    init(serverController: ServerController) {
-        self.serverController = serverController
-        self.selection = .local
-        selection = currentChoice
-    }
-
-    /// The choice that the app's current remote access switches amount to.
-    var currentChoice: RemoteChoice {
-        RemoteChoice.current(
-            .init(
-                tailscale: serverController.isRemoteAccessEnabled,
-                funnel: serverController.isRemoteAccessFunnelEnabled,
-                cloudflare: serverController.cloudflareTunnel.isEnabled
-            )
-        )
-    }
-
-    /// Selects the way that matches the app's current state.
-    func syncSelection() {
-        selection = currentChoice
-    }
-
-    /// Applies a choice with the app's existing remote access state.
-    /// Cloudflare only becomes selected here; it needs a login and a hostname first.
-    func choose(_ choice: RemoteChoice) {
-        selection = choice
-        let target = choice.switches
-        if serverController.isRemoteAccessEnabled != target.tailscale {
-            serverController.isRemoteAccessEnabled = target.tailscale
-        }
-        if serverController.isRemoteAccessFunnelEnabled != target.funnel {
-            serverController.isRemoteAccessFunnelEnabled = target.funnel
-        }
-        // Picking another way to reach this Mac ends the tunnel. Picking Cloudflare starts nothing until it is set up.
-        if !target.cloudflare, serverController.cloudflareTunnel.isEnabled {
-            serverController.cloudflareTunnel.setEnabled(false)
-        }
-    }
-
-    /// The live state of iMCP's Tailscale node, as the checklist reads it.
-    var tailscaleInputs: TailscaleChecklist.Inputs {
-        let node: TailscaleChecklist.Node
-        var funnelAllowed: Bool?
-        var publicAddress = TailscaleChecklist.PublicAddress.off
-        switch serverController.remoteAccessState {
-        case .needsLogin(let url): node = .needsLogin(url)
-        case .starting: node = .starting
-        case .needsApproval: node = .needsApproval
-        case .failed(let reason): node = .failed(reason)
-        case .running(let endpoint):
-            node = .running(dnsName: endpoint.dnsName)
-            funnelAllowed = endpoint.funnelCapabilityGranted
-            switch endpoint.funnel {
-            case .off: break
-            case .active(let url): publicAddress = URL(string: url).map { .active($0) } ?? .off
-            case .failed(let message): publicAddress = .failed(message)
-            }
-        default: node = .off
-        }
-        return TailscaleChecklist.Inputs(
-            node: node,
-            funnelAllowed: funnelAllowed,
-            publicAddress: publicAddress,
-            wantsPublicAddress: selection == .funnel,
-            isWaitingForApproval: isWaitingForTailscale
-        )
-    }
-
-    /// Opens a page that Tailscale asked the person to visit, then re-checks every few seconds
-    /// and moves on by itself when the permission turns up.
-    func openTailscalePage(_ url: URL) {
-        NSWorkspace.shared.open(url)
-        isWaitingForTailscale = true
-        tailscaleTask?.cancel()
-        tailscaleTask = Task { [weak self] in
-            for _ in 0 ..< 100 {
-                try? await Task.sleep(for: .seconds(4))
-                guard let self, !Task.isCancelled else { return }
-                if TailscaleChecklist.items(self.tailscaleInputs).allSatisfy(\.isDone) { break }
-                self.serverController.refreshRemoteMobileConfiguration()
-            }
-            self?.isWaitingForTailscale = false
-        }
-    }
-
-    func stop() {
-        tailscaleTask?.cancel()
-        tailscaleTask = nil
-    }
-}
-
 extension RemoteChoice {
-    /// The name in menus and summaries.
-    var settingsName: String {
-        switch self {
-        case .local: "Local only"
-        case .tailscale: "Tailscale"
-        case .funnel: "Tailscale public address"
-        case .cloudflare: "Cloudflare Tunnel"
-        }
-    }
-
     /// One short line that says what the way is for.
     var settingsCaption: String {
         switch self {
@@ -138,24 +24,28 @@ extension RemoteChoice {
 // MARK: - Checklists
 
 /// The Tailscale lines of the checklist, with the live state beside each.
+/// The Setup Assistant and the Remote Access tab in Settings both show it.
 struct TailscaleChecklistView: View {
-    @ObservedObject var remote: RemoteAccessCoordinator
+    let inputs: TailscaleChecklist.Inputs
+    /// Opens a page that Tailscale asked the person to visit, and re-checks until the permission shows up.
+    let openTailscalePage: (URL) -> Void
+    let getSignInLink: () -> Void
     var compact = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(TailscaleChecklist.items(remote.tailscaleInputs)) { item in
+            ForEach(TailscaleChecklist.items(inputs)) { item in
                 ChecklistRow(
                     title: ChecklistTitles.title(for: item.kind),
                     item: item,
                     openLink: { url in
-                        if item.kind == .signedIn { openURL(url) } else { remote.openTailscalePage(url) }
+                        if item.kind == .signedIn { openURL(url) } else { openTailscalePage(url) }
                     }
                 )
             }
-            if case .needsLogin(nil) = remote.tailscaleInputs.node {
-                Button("Get Sign-In Link") { remote.serverController.restartRemoteAccessNode() }
+            if case .needsLogin(nil) = inputs.node {
+                Button("Get Sign-In Link", action: getSignInLink)
                     .checklistButton(compact: compact)
             }
         }

@@ -6,7 +6,8 @@ import SwiftUI
 struct RemoteAccessSettingsView: View {
     @ObservedObject var serverController: ServerController
     @ObservedObject private var cloudflare: CloudflareTunnelController
-    @StateObject private var remote: RemoteAccessCoordinator
+    /// The Setup Assistant's model, which holds the chosen way and its live checklist state.
+    @StateObject private var remote: OnboardingModel
 
     @State private var isShowingCredentialSheet = false
     @State private var isConfirmingTailscaleLogOut = false
@@ -15,19 +16,28 @@ struct RemoteAccessSettingsView: View {
     init(serverController: ServerController) {
         self.serverController = serverController
         self.cloudflare = serverController.cloudflareTunnel
-        _remote = StateObject(wrappedValue: RemoteAccessCoordinator(serverController: serverController))
+        _remote = StateObject(
+            wrappedValue: OnboardingModel(
+                mode: .finishSetup,
+                serverController: serverController,
+                isEnabled: Binding(
+                    get: { UserDefaults.standard.object(forKey: "isEnabled") as? Bool ?? true },
+                    set: { UserDefaults.standard.set($0, forKey: "isEnabled") }
+                )
+            )
+        )
     }
 
     var body: some View {
-        let selection = remote.selection
+        let selection = remote.remoteSelection
 
         Form {
             Section {
                 Picker(
-                    selection: Binding(get: { remote.selection }, set: { remote.choose($0) })
+                    selection: Binding(get: { remote.remoteSelection }, set: { remote.choose($0) })
                 ) {
                     ForEach(RemoteChoice.allCases, id: \.self) { choice in
-                        Label(choice.settingsName, systemImage: choice.settingsSymbol).tag(choice)
+                        Label(choice.summaryName, systemImage: choice.settingsSymbol).tag(choice)
                     }
                 } label: {
                     RowLabel(title: "Reach this Mac", subtitle: selection.settingsCaption) {
@@ -65,10 +75,10 @@ struct RemoteAccessSettingsView: View {
         .formStyle(.grouped)
         .navigationTitle("Remote Access")
         .onAppear {
-            remote.syncSelection()
+            remote.reset(mode: .finishSetup)
             cloudflare.refreshEnvironment()
         }
-        .onDisappear { remote.stop() }
+        .onDisappear { remote.windowWillClose() }
         .sheet(isPresented: $isShowingCredentialSheet) {
             CloudflareCredentialSheet(cloudflare: cloudflare)
         }
@@ -101,7 +111,12 @@ struct RemoteAccessSettingsView: View {
                     SettingsIcon(symbol: choice.settingsSymbol, color: .gray)
                 }
             }
-            TailscaleChecklistView(remote: remote, compact: true)
+            TailscaleChecklistView(
+                inputs: remote.tailscaleInputs,
+                openTailscalePage: remote.openTailscalePage,
+                getSignInLink: { serverController.restartRemoteAccessNode() },
+                compact: true
+            )
 
             if case .running(let endpoint) = serverController.remoteAccessState {
                 if choice == .funnel, endpoint.funnelCapabilityGranted == false {
@@ -112,7 +127,7 @@ struct RemoteAccessSettingsView: View {
                 Button("Log Out of Tailscale…", role: .destructive) { isConfirmingTailscaleLogOut = true }
             }
         } header: {
-            SectionTitle(title: choice.settingsName, symbol: "checklist")
+            SectionTitle(title: choice.summaryName, symbol: "checklist")
         }
     }
 
