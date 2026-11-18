@@ -50,9 +50,9 @@ struct App: SwiftUI.App {
                 #endif
             }
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
         .onChange(of: isEnabled) { _, isEnabled in
-            // The menu's content isn't alive while the menu is closed, so sync the server here.
+            // The panel's content isn't alive while it is closed, and the Setup Assistant changes this too.
             Task { await serverController.setEnabled(isEnabled) }
         }
         .onChange(of: showMenuBarExtra) { _, showMenuBarExtra in
@@ -67,6 +67,15 @@ struct App: SwiftUI.App {
         .onChange(of: appDelegate.shouldCheckOnboarding, initial: true) { _, shouldCheck in
             guard shouldCheck else { return }
             appDelegate.shouldCheckOnboarding = false
+            #if DEBUG
+                if OnboardingSnapshot.runIfRequested(
+                    serverController: serverController,
+                    isEnabled: $isEnabled,
+                    updater: updaterController.updater
+                ) {
+                    return
+                }
+            #endif
             let defaults = UserDefaults.standard
             let hasSeen = defaults.bool(forKey: OnboardingGate.seenDefaultsKey)
             let hasTrusted =
