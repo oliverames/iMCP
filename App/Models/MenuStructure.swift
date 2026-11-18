@@ -2,10 +2,6 @@ import Foundation
 
 /// The commands in the menu bar menu that run an action.
 enum MenuAction: String, CaseIterable, Equatable {
-    case setUp
-    case configureClaudeDesktop
-    case configureClaudeCode
-    case copyServerCommand
     case settings
     case checkForUpdates
     case about
@@ -13,10 +9,6 @@ enum MenuAction: String, CaseIterable, Equatable {
 
     var title: String {
         switch self {
-        case .setUp: "Set Up iMCP…"
-        case .configureClaudeDesktop: "Configure Claude Desktop…"
-        case .configureClaudeCode: "Configure Claude Code…"
-        case .copyServerCommand: "Copy Server Command"
         case .settings: "Settings…"
         case .checkForUpdates: "Check for Updates…"
         case .about: "About iMCP"
@@ -39,6 +31,8 @@ enum MenuSection: Equatable {
     case server(isOn: Bool, status: [String])
     /// The services, under a "Services" header. Not shown while the server is off.
     case services(items: [MenuServiceItem])
+    /// One row that opens the recent tool calls in a flyout beside the menu while the pointer is over it.
+    case activity
     case actions([MenuAction])
 }
 
@@ -56,7 +50,7 @@ enum MenuStructure {
         ]
         if isServerEnabled { sections.append(.services(items: services)) }
         return sections + [
-            .actions([.setUp, .configureClaudeDesktop, .configureClaudeCode, .copyServerCommand]),
+            .activity,
             .actions([.settings, .checkForUpdates, .about]),
             .actions([.quit]),
         ]
