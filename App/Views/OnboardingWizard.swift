@@ -1,601 +1,289 @@
-import AppKit
-import CoreImage.CIFilterBuiltins
+// Copyright (c) 2025-2026 Oliver Ames. All rights reserved.
+// Licensed under the MIT License.
+
+// Adapted from Ping Warden's onboarding (OnboardingView.swift).
+
 import SwiftUI
 
-/// Guided setup for services, remote tunnels, iPhone pairing, approvals, and connecting AI apps.
-///
-/// A sidebar lists the steps, and the detail pane shows the current step as grouped `Form`s,
-/// side by side where the window is wide. Back and Continue are in a footer, as glass buttons on macOS 26.
-/// Everything here is also in Settings; the assistant only puts the first-run choices in order.
-struct OnboardingWizardView: View {
-    @ObservedObject var serverController: ServerController
-    @Binding var isEnabled: Bool
-    let onFinish: () -> Void
+// MARK: - Layout scale
 
-    @State private var step: Step
+/// One spacing scale for every screen, so gaps read as related or separate
+/// at a glance: 4 inside a label pair, 8 between a title and its line, 16
+/// between items, 24 between groups.
+enum OnboardingSpacing {
+    static let tight: CGFloat = 4
+    static let small: CGFloat = 8
+    static let medium: CGFloat = 16
+    static let large: CGFloat = 24
+    static let gutter: CGFloat = 40
+    /// The readable column for body text and cards.
+    static let column: CGFloat = 420
+}
 
-    init(
-        serverController: ServerController,
-        isEnabled: Binding<Bool>,
-        initialStep: Step = .services,
-        onFinish: @escaping () -> Void
-    ) {
-        self.serverController = serverController
-        self._isEnabled = isEnabled
-        self._step = State(initialValue: initialStep)
-        self.onFinish = onFinish
-    }
+// MARK: - Window content
 
-    enum Step: Int, CaseIterable, Identifiable {
-        case services, remote, mobile, approvals, apps
+/// The setup window: the first-run Welcome, the guided steps that follow it, and Set Up iMCP,
+/// which resumes at the first step that is not done. Each guided screen centers its content
+/// vertically between the title bar and the button row.
+struct OnboardingView: View {
+    /// The window is 540 points wide and as tall as the current screen's content, so no screen
+    /// carries a band of empty space. Shorter screens keep a floor height so the window does not
+    /// jump between steps and the footer buttons stay under the pointer. On a display too short
+    /// for a screen, the window stops at the display's visible height and the screen scrolls.
+    static let width: CGFloat = 540
+    static let minimumContentHeight: CGFloat = 420
+    /// Accessibility text sizes scroll inside a window of this height.
+    static let accessibilityHeight: CGFloat = 680
 
-        var id: Int { rawValue }
-
-        var title: String {
-            switch self {
-            case .services: "Services"
-            case .remote: "Remote Access"
-            case .mobile: "iPhone & iPad"
-            case .approvals: "Approvals"
-            case .apps: "Connect Apps"
-            }
-        }
-
-        var symbol: String {
-            switch self {
-            case .services: "switch.2"
-            case .remote: "network"
-            case .mobile: "iphone"
-            case .approvals: "checkmark.shield"
-            case .apps: "app.connected.to.app.below.fill"
-            }
-        }
-    }
+    @ObservedObject var model: OnboardingModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        NavigationSplitView {
-            List(Step.allCases, selection: stepSelection) { item in
-                Label {
-                    Text(item.title)
-                } icon: {
-                    Image(systemName: item.rawValue < step.rawValue ? "checkmark.circle.fill" : item.symbol)
-                }
-                .tag(item)
-            }
-            .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
-        } detail: {
-            detail
-                .formStyle(.grouped)
-                .navigationTitle("Set Up iMCP")
-                .navigationSubtitle("\(step.title), step \(step.rawValue + 1) of \(Step.allCases.count)")
-                .modifier(WizardScrollEdge())
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    WizardFooter(step: $step, onFinish: onFinish)
-                }
+        // The window measures this view and sizes itself, no taller than its display.
+        // A screen that doesn't fit scrolls rather than asking the window to grow past the display.
+        ViewThatFits(in: .vertical) {
+            sizedContent
+            ScrollView { sizedContent }
         }
-        .frame(minWidth: 720, idealWidth: 880, minHeight: 480, idealHeight: 560)
+        .background(.background)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: model.step)
     }
 
-    /// The sidebar can deselect; the assistant always has a step.
-    private var stepSelection: Binding<Step?> {
-        Binding(get: { step }, set: { if let value = $0 { step = value } })
+    /// The current screen at its own height, or the accessibility height.
+    private var sizedContent: some View {
+        Group {
+            if model.step == .welcome {
+                WelcomeScreen(model: model)
+            } else {
+                VStack(spacing: 0) {
+                    if dynamicTypeSize.isAccessibilitySize {
+                        ScrollView { steppedContent }
+                    } else {
+                        steppedContent
+                    }
+                    footer
+                }
+            }
+        }
+        .frame(width: Self.width)
+        .frame(height: dynamicTypeSize.isAccessibilitySize ? Self.accessibilityHeight : nil)
+        .fixedSize(horizontal: false, vertical: !dynamicTypeSize.isAccessibilitySize)
+    }
+
+    /// The current screen, centered in at least the floor height.
+    private var steppedContent: some View {
+        screen
+            .padding(.horizontal, OnboardingSpacing.gutter)
+            .padding(.top, OnboardingSpacing.small)
+            .padding(.bottom, OnboardingSpacing.large)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: Self.minimumContentHeight)
     }
 
     @ViewBuilder
-    private var detail: some View {
-        switch step {
-        case .services:
-            ServicesStepView(serverController: serverController, isEnabled: $isEnabled)
-        case .remote:
-            RemoteStepView(serverController: serverController, cloudflare: serverController.cloudflareTunnel)
-        case .mobile:
-            MobileStepView()
-        case .approvals:
-            ApprovalsStepView(serverController: serverController)
-        case .apps:
-            AppsStepView(serverController: serverController)
-        }
-    }
-}
-
-// MARK: - Footer and glass
-
-/// Back, Continue, and Close. The buttons are glass on macOS 26 and later,
-/// where the system keeps them legible over the scrolling form, and bordered buttons on a bar before that.
-private struct WizardFooter: View {
-    @Binding var step: OnboardingWizardView.Step
-    let onFinish: () -> Void
-
-    var body: some View {
-        if #available(macOS 26, *) {
-            GlassEffectContainer { buttons.padding() }
-        } else {
-            buttons.padding().background(.bar)
-        }
-    }
-
-    private var buttons: some View {
-        HStack {
-            Button("Close", action: onFinish)
-                .keyboardShortcut(.cancelAction)
-                .modifier(WizardButtonStyle(isProminent: false))
-
-            Spacer()
-
-            if let previous = OnboardingWizardView.Step(rawValue: step.rawValue - 1) {
-                Button("Back") { step = previous }
-                    .modifier(WizardButtonStyle(isProminent: false))
-            }
-
-            if let next = OnboardingWizardView.Step(rawValue: step.rawValue + 1) {
-                Button("Continue") { step = next }
-                    .keyboardShortcut(.defaultAction)
-                    .modifier(WizardButtonStyle(isProminent: true))
-            } else {
-                Button("Done", action: onFinish)
-                    .keyboardShortcut(.defaultAction)
-                    .modifier(WizardButtonStyle(isProminent: true))
+    private var screen: some View {
+        Group {
+            switch model.step {
+            case .welcome: EmptyView()
+            case .services: ServicesScreen(model: model, serverController: model.serverController)
+            case .connectApps: ConnectAppsScreen(model: model)
+            case .remoteAccess:
+                RemoteAccessScreen(
+                    model: model,
+                    serverController: model.serverController,
+                    cloudflare: model.serverController.cloudflareTunnel
+                )
+            case .iPhone: IPhoneScreen(model: model)
+            case .done: DoneScreen(model: model, serverController: model.serverController)
             }
         }
+        .id(model.step)
+        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
     }
-}
 
-private struct WizardButtonStyle: ViewModifier {
-    let isProminent: Bool
+    // MARK: Footer
 
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            if isProminent {
-                content.buttonStyle(.glassProminent)
-            } else {
-                content.buttonStyle(.glass)
-            }
-        } else if isProminent {
-            content.buttonStyle(.borderedProminent)
-        } else {
-            content.buttonStyle(.bordered)
-        }
-    }
-}
-
-/// Fades the form out softly under the footer, so the glass buttons stay legible.
-private struct WizardScrollEdge: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(macOS 26, *) {
-            content.scrollEdgeEffectStyle(.soft, for: .bottom)
-        } else {
-            content
-        }
-    }
-}
-
-// MARK: - Services
-
-private struct ServicesStepView: View {
-    @ObservedObject var serverController: ServerController
-    @Binding var isEnabled: Bool
-    @State private var width: CGFloat = 700
-
-    var body: some View {
-        let configs = serverController.computedServiceConfigs
-
-        ScrollView {
-            VStack(spacing: 0) {
-                Form {
-                    Section {
-                        Toggle("Enable MCP Server", isOn: $isEnabled)
-                        LabeledContent("Recommended services") {
-                            Button("Turn On All") {
-                                isEnabled = true
-                                for config in configs where !(config.service is HomeService) {
-                                    if !config.binding.wrappedValue {
-                                        serverController.setService(config, enabled: true)
-                                    }
-                                }
-                            }
-                        }
-                        .disabled(!isEnabled)
-                    } footer: {
-                        Text(
-                            "AI apps can use iMCP only while the server is on. macOS asks for permission the first time each service turns on. Home stays off until you turn it on yourself."
-                        )
-                    }
+    private var footer: some View {
+        OnboardingGlassGroup(spacing: 8) {
+            ZStack {
+                PageDots(count: model.navigator.pageSteps.count, index: model.navigator.pageIndex)
+                HStack(spacing: 8) {
+                    leadingButton
+                    Spacer(minLength: 12)
+                    trailingButton
                 }
-                .scrollDisabled(true)
-                .fixedSize(horizontal: false, vertical: true)
-
-                // Three columns when the window is wide, two when it is narrower.
-                columns(of: configs, count: width >= 630 ? 3 : width >= 420 ? 2 : 1)
-                    .disabled(!isEnabled)
             }
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .onGeometryChange(for: CGFloat.self) {
-            $0.size.width
-        } action: {
-            width = $0
+        .padding(.horizontal, OnboardingSpacing.large)
+        .frame(height: 76)
+    }
+
+    @ViewBuilder
+    private var leadingButton: some View {
+        if model.step == .done {
+            Button("Open Settings") { model.openSettingsTapped() }
+                .onboardingSecondary()
+                .accessibilityIdentifier("onboarding.openSettings")
+        } else {
+            Button(model.navigator.canGoBack ? "Back" : "Not Now") { model.backTapped() }
+                .onboardingSecondary()
+                .keyboardShortcut(model.navigator.canGoBack ? nil : .cancelAction)
+                .accessibilityIdentifier("onboarding.back")
         }
     }
 
-    private func columns(of configs: [ServiceConfig], count: Int) -> some View {
-        let size = (configs.count + count - 1) / count
-        let chunks = stride(from: 0, to: configs.count, by: size).map {
-            Array(configs[$0 ..< min($0 + size, configs.count)])
-        }
-        return HStack(alignment: .top, spacing: 0) {
-            ForEach(Array(chunks.enumerated()), id: \.offset) { _, chunk in
-                Form {
-                    Section {
-                        ForEach(chunk) { config in
-                            Toggle(
-                                isOn: Binding(
-                                    get: { config.binding.wrappedValue },
-                                    set: { serverController.setService(config, enabled: $0) }
-                                )
-                            ) {
-                                Label(config.name, systemImage: config.iconName)
-                            }
-                        }
-                    }
-                }
-                .scrollDisabled(true)
-                .fixedSize(horizontal: false, vertical: true)
-
+    @ViewBuilder
+    private var trailingButton: some View {
+        switch model.step {
+        case .welcome:
+            EmptyView()
+        case .done:
+            Button("Done") { model.closeTapped() }
+                .onboardingPrimary()
+                .accessibilityIdentifier("onboarding.done")
+        case .services, .remoteAccess:
+            Button("Continue") { model.continueTapped() }
+                .onboardingPrimary()
+                .accessibilityIdentifier("onboarding.continue")
+        case .connectApps, .iPhone:
+            if model.progress.isComplete(model.step) {
+                Button("Continue") { model.continueTapped() }
+                    .onboardingPrimary()
+                    .accessibilityIdentifier("onboarding.continue")
+            } else {
+                Button("Skip") { model.continueTapped() }
+                    .onboardingSecondary()
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("onboarding.skip")
             }
         }
     }
 }
 
-// MARK: - Remote tunnels
+// MARK: - Buttons
 
-private struct RemoteStepView: View {
-    @ObservedObject var serverController: ServerController
-    @ObservedObject var cloudflare: CloudflareTunnelController
-    @Environment(\.openURL) private var openURL
+extension View {
+    /// The screen's one primary action: prominent Liquid Glass on macOS 26,
+    /// the bordered prominent style before it.
+    @ViewBuilder
+    func onboardingPrimary(isDefault: Bool = true) -> some View {
+        let base = self.controlSize(.large).keyboardShortcut(isDefault ? .defaultAction : nil)
+        if #available(macOS 26, *) {
+            base.buttonStyle(.glassProminent)
+        } else {
+            base.buttonStyle(.borderedProminent)
+        }
+    }
+
+    @ViewBuilder
+    func onboardingSecondary() -> some View {
+        let base = self.controlSize(.large)
+        if #available(macOS 26, *) {
+            base.buttonStyle(.glass)
+        } else {
+            base.buttonStyle(.bordered)
+        }
+    }
+}
+
+struct PageDots: View {
+    let count: Int
+    let index: Int?
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(
-                "Cloud apps such as claude.ai, Claude Duet, and Muse reach your Mac over an encrypted HTTPS tunnel and OAuth. This is optional; skip it if you only use apps on this Mac."
-            )
+        if count > 0, let index {
+            HStack(spacing: 7) {
+                ForEach(0 ..< count, id: \.self) { dot in
+                    Circle()
+                        .fill(dot == index ? Color.primary : Color.secondary.opacity(dot < index ? 0.7 : 0.35))
+                        .frame(width: 7, height: 7)
+                        .scaleEffect(dot == index ? 1.15 : 1)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Step \(index + 1) of \(count)")
+        }
+    }
+}
+
+// MARK: - Screens
+
+struct ScreenTitle: View {
+    let title: String
+    var subtitle: String?
+    var large = false
+
+    var body: some View {
+        VStack(spacing: OnboardingSpacing.small) {
+            Text(title)
+                .font(large ? .largeTitle : .title)
+                .fontWeight(.bold)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: OnboardingSpacing.column)
+            }
+        }
+    }
+}
+
+struct Caption: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption)
             .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: OnboardingSpacing.column)
+    }
+}
+
+struct LargeAppIcon: View {
+    var size: CGFloat = 80
+
+    var body: some View {
+        Image(nsImage: NSApplication.shared.applicationIconImage)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+struct WelcomeBenefitRow: View {
+    let benefit: OnboardingCopy.Benefit
+
+    var body: some View {
+        HStack(alignment: .top, spacing: OnboardingSpacing.medium) {
+            Image(systemName: benefit.symbol)
+                .font(.title2)
+                .foregroundStyle(.tint)
+                .frame(width: 32)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: OnboardingSpacing.tight) {
+                Text(benefit.title)
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(benefit.detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding([.horizontal, .top], 20)
-
-            HStack(alignment: .top, spacing: 0) {
-                Form { cloudflareSection }
-                Form { tailscaleSection }
-            }
         }
+        .accessibilityElement(children: .combine)
     }
-
-    // MARK: Cloudflare
-
-    private var cloudflareSection: some View {
-        Section {
-            if cloudflare.account == nil {
-                LabeledContent {
-                    Button("Log In…") {
-                        Task { await cloudflare.logInWithBrowser() }
-                    }
-                    .disabled(!cloudflare.isBinaryAvailable || cloudflare.state == .loggingIn)
-                } label: {
-                    Label("Not signed in", systemImage: "person.crop.circle.badge.questionmark")
-                }
-                if cloudflare.detectedCertURL != nil {
-                    LabeledContent("Cloudflare account found on this Mac") {
-                        Button("Use It") {
-                            Task { await cloudflare.useDetectedCert() }
-                        }
-                    }
-                }
-            } else {
-                if cloudflare.zones.count > 1 {
-                    Picker("Domain", selection: $cloudflare.selectedZoneID) {
-                        ForEach(cloudflare.zones) { zone in
-                            Text(zone.name).tag(zone.id)
-                        }
-                    }
-                }
-                TextField("Hostname", text: $cloudflare.hostnameDraft, prompt: Text("imcp.example.com"))
-                if let url = cloudflare.state.activeURL {
-                    LabeledContent {
-                        Button("Copy URL") { copyToPasteboard(url) }
-                    } label: {
-                        Label("Connected", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text(url)
-                            .textSelection(.enabled)
-                    }
-                } else {
-                    LabeledContent("Tunnel") {
-                        Button("Set Up Tunnel") {
-                            Task { await cloudflare.provisionAndConnect() }
-                        }
-                    }
-                }
-            }
-            if case .failed(let reason) = cloudflare.state {
-                Label(reason, systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.red)
-            }
-        } header: {
-            Text("Cloudflare Tunnel")
-        } footer: {
-            Text("Opens iMCP on your own Cloudflare domain, without Tailscale.")
-        }
-    }
-
-    // MARK: Tailscale
-
-    private var tailscaleSection: some View {
-        Section {
-            Toggle(
-                "Use Tailscale",
-                isOn: Binding(
-                    get: { serverController.isRemoteAccessEnabled },
-                    set: { serverController.isRemoteAccessEnabled = $0 }
-                )
-            )
-
-            if serverController.isRemoteAccessEnabled {
-                switch serverController.remoteAccessState {
-                case .needsLogin(let url):
-                    LabeledContent {
-                        if let url {
-                            Button("Sign In…") { openURL(url) }
-                        } else {
-                            Button("Get Sign-In Link") { serverController.restartRemoteAccessNode() }
-                        }
-                    } label: {
-                        Label("Sign in to connect this Mac", systemImage: "person.crop.circle.badge.exclamationmark")
-                    }
-                case .running(let endpoint):
-                    LabeledContent {
-                        Text(endpoint.ipv4Address)
-                    } label: {
-                        Label("Connected to your tailnet", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    }
-                    Toggle(
-                        "Public access with Funnel",
-                        isOn: Binding(
-                            get: { serverController.isRemoteAccessFunnelEnabled },
-                            set: { serverController.isRemoteAccessFunnelEnabled = $0 }
-                        )
-                    )
-                    if case .active(let funnelURL) = endpoint.funnel {
-                        LabeledContent {
-                            Button("Copy URL") { copyToPasteboard(funnelURL) }
-                        } label: {
-                            Text(funnelURL)
-                                .textSelection(.enabled)
-                        }
-                    }
-                case .starting:
-                    Label("Starting…", systemImage: "hourglass")
-                        .foregroundStyle(.secondary)
-                case .needsApproval:
-                    Label(
-                        "Waiting for approval in your Tailscale admin console",
-                        systemImage: "exclamationmark.circle.fill"
-                    )
-                    .foregroundStyle(.orange)
-                case .failed(let reason):
-                    Label(reason, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
-                case .off, .loggingOut:
-                    EmptyView()
-                }
-            }
-        } header: {
-            Text("Tailscale")
-        } footer: {
-            Text(
-                "Adds iMCP to your tailnet as its own device. Funnel also opens a public HTTPS address, so cloud apps can connect."
-            )
-        }
-    }
-}
-
-// MARK: - iPhone and iPad
-
-private struct MobileStepView: View {
-    @State private var pairedDevices: [MobileDevice] = []
-    @State private var connectedDevice: MobileDevice?
-    @State private var pairingCode: MobilePairingCode?
-    @State private var pairingExpires: Date?
-    @State private var pairingError: String?
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            Form {
-                Section {
-                    if pairedDevices.isEmpty {
-                        Text("No iPhone or iPad is paired yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(pairedDevices) { device in
-                            let isConnected = connectedDevice?.id == device.id
-                            LabeledContent {
-                                Text(isConnected ? "Connected" : "Paired")
-                            } label: {
-                                Label(
-                                    device.name,
-                                    systemImage: isConnected ? "iphone.radiowaves.left.and.right" : "iphone"
-                                )
-                            }
-                        }
-                    }
-
-                    if pairingCode == nil {
-                        LabeledContent("Pair a device") {
-                            Button(pairedDevices.isEmpty ? "Pair…" : "Pair Another…") {
-                                beginPairing()
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Devices")
-                } footer: {
-                    Text(
-                        "The iMCP app for iPhone shares Health and Alarms, shows every tool call, and lets you approve requests from your phone."
-                    )
-                }
-
-                if let pairingError {
-                    Section {
-                        Label(pairingError, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                    }
-                }
-            }
-
-            if let pairingCode, let pairingExpires {
-                Form {
-                    Section {
-                        if let qr = qrImage(pairingCode.url.absoluteString) {
-                            Image(nsImage: qr)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: 200)
-                                .frame(maxWidth: .infinity)
-                                .accessibilityLabel("Pairing code")
-                        }
-                        LabeledContent("Expires") {
-                            Text(pairingExpires, format: .dateTime.hour().minute())
-                        }
-                        LabeledContent("Pairing link") {
-                            Button("Copy") { copyToPasteboard(pairingCode.url.absoluteString) }
-                        }
-                    } header: {
-                        Text("Scan in the iMCP app")
-                    }
-                }
-            }
-        }
-        .task {
-            pairedDevices = await MobileService.shared.devices
-            connectedDevice = await MobileService.shared.connectedDevice
-        }
-    }
-
-    private func beginPairing() {
-        Task {
-            do {
-                pairingCode = try await MobileService.shared.beginPairing()
-                pairingExpires = Date().addingTimeInterval(MobileService.pairingLifetime)
-                pairingError = nil
-            } catch {
-                pairingError = error.localizedDescription
-            }
-        }
-    }
-
-    private func qrImage(_ text: String) -> NSImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(text.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage?.transformed(by: CGAffineTransform(scaleX: 7, y: 7)),
-            let cgImage = CIContext().createCGImage(output, from: output.extent)
-        else { return nil }
-        return NSImage(cgImage: cgImage, size: NSSize(width: output.extent.width, height: output.extent.height))
-    }
-}
-
-// MARK: - Approvals
-
-private struct ApprovalsStepView: View {
-    @ObservedObject var serverController: ServerController
-
-    var body: some View {
-        let mode = Binding(
-            get: { serverController.approvalMode },
-            set: { serverController.approvalMode = $0 }
-        )
-
-        Form {
-            Section {
-                Picker("Approval mode", selection: mode) {
-                    ForEach(ApprovalMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.inline)
-                .labelsHidden()
-            } header: {
-                Text("Before a tool runs")
-            } footer: {
-                Text(mode.wrappedValue.summary)
-            }
-        }
-    }
-}
-
-// MARK: - Connect apps
-
-private struct AppsStepView: View {
-    @ObservedObject var serverController: ServerController
-
-    var body: some View {
-        let publicURLs = serverController.activePublicURLs
-
-        Form {
-            Section {
-                LabeledContent {
-                    Button("Set Up…") {
-                        ClaudeDesktop.showConfigurationPanel(serverController: serverController)
-                    }
-                } label: {
-                    Label("Claude Desktop", systemImage: "macwindow")
-                }
-                LabeledContent {
-                    Button("Set Up…") {
-                        ClaudeCode.showConfigurationPanel(serverController: serverController)
-                    }
-                } label: {
-                    Label("Claude Code", systemImage: "terminal")
-                }
-            } header: {
-                Text("Apps on this Mac")
-            } footer: {
-                Text(
-                    "The first time an app connects, iMCP asks once: Allow Once or Always Allow."
-                )
-            }
-
-            Section {
-                if publicURLs.isEmpty {
-                    Text("Turn on Cloudflare Tunnel or Tailscale Funnel in the Remote step to get a connector URL.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(publicURLs, id: \.url) { item in
-                        LabeledContent {
-                            Button("Copy URL") { copyToPasteboard(item.url) }
-                        } label: {
-                            Text(item.provider)
-                            Text(item.url)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            } header: {
-                Text("Cloud apps")
-            } footer: {
-                if !publicURLs.isEmpty {
-                    Text(
-                        "In claude.ai, open Settings, then Connectors, then Add custom connector, and paste the URL. Claude Duet and Muse take the same URL as a custom MCP connector. Approve the connection once in iMCP."
-                    )
-                }
-            }
-        }
-    }
-}
-
-private func copyToPasteboard(_ string: String) {
-    let pasteboard = NSPasteboard.general
-    pasteboard.clearContents()
-    pasteboard.setString(string, forType: .string)
-    _ = NSSound.play(.pop)
 }
