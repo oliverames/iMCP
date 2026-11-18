@@ -67,7 +67,8 @@ final class OnboardingModel: ObservableObject {
             hasServices: serverController.computedServiceConfigs.contains {
                 $0.name != "Maps" && $0.name != "Utilities" && $0.binding.wrappedValue
             },
-            hasConnectedApp: ClaudeDesktop.isConfigured || ClaudeCode.isConfigured,
+            hasConnectedApp: ClaudeDesktop.isConfigured || ClaudeCode.isConfigured
+                || !serverController.oauthConnections.grants.isEmpty,
             hasRemoteAccess: currentRemoteChoice != .local,
             hasPairedDevice: !pairedDevices.isEmpty
         )

@@ -9,7 +9,7 @@ final class OnboardingNavigatorTests: XCTestCase {
     func testFirstRunHasASingleWelcomeThenFiveDots() {
         var nav = OnboardingNavigator(mode: .firstRun, progress: OnboardingProgress())
         XCTAssertEqual(nav.step, .welcome)
-        XCTAssertEqual(nav.pageSteps, [.services, .connectApps, .remoteAccess, .iPhone, .done])
+        XCTAssertEqual(nav.pageSteps, [.services, .remoteAccess, .connectApps, .iPhone, .done])
         XCTAssertNil(nav.pageIndex, "the Welcome keeps its own layout without dots")
         XCTAssertFalse(nav.canGoBack, "Welcome closes with Not Now")
         nav.advance()
@@ -25,7 +25,7 @@ final class OnboardingNavigatorTests: XCTestCase {
             nav.advance()
             seen.append(nav.step)
         }
-        XCTAssertEqual(seen, [.welcome, .services, .connectApps, .remoteAccess, .iPhone, .done])
+        XCTAssertEqual(seen, [.welcome, .services, .remoteAccess, .connectApps, .iPhone, .done])
         nav.advance()
         XCTAssertEqual(nav.step, .done, "Done is the end")
     }
@@ -35,9 +35,9 @@ final class OnboardingNavigatorTests: XCTestCase {
         nav.advance()
         nav.advance()
         nav.advance()
-        XCTAssertEqual(nav.step, .remoteAccess)
+        XCTAssertEqual(nav.step, .connectApps, "the agents come after the remote access they need")
         nav.goBack()
-        XCTAssertEqual(nav.step, .connectApps)
+        XCTAssertEqual(nav.step, .remoteAccess)
         nav.goBack()
         XCTAssertEqual(nav.step, .services)
         nav.goBack()
@@ -49,12 +49,12 @@ final class OnboardingNavigatorTests: XCTestCase {
         var progress = OnboardingProgress()
         XCTAssertEqual(OnboardingNavigator(mode: .finishSetup, progress: progress).step, .services)
         progress.hasServices = true
-        XCTAssertEqual(OnboardingNavigator(mode: .finishSetup, progress: progress).step, .connectApps)
-        progress.hasConnectedApp = true
+        XCTAssertEqual(OnboardingNavigator(mode: .finishSetup, progress: progress).step, .remoteAccess)
+        progress.hasRemoteAccess = true
         let nav = OnboardingNavigator(mode: .finishSetup, progress: progress)
-        XCTAssertEqual(nav.step, .remoteAccess)
+        XCTAssertEqual(nav.step, .connectApps)
         XCTAssertFalse(nav.canGoBack, "Set Up iMCP does not replay the welcome")
-        XCTAssertEqual(nav.pageSteps, [.remoteAccess, .iPhone, .done])
+        XCTAssertEqual(nav.pageSteps, [.connectApps, .iPhone, .done])
         XCTAssertEqual(nav.pageIndex, 0)
     }
 
@@ -75,8 +75,9 @@ final class OnboardingNavigatorTests: XCTestCase {
         var nav = OnboardingNavigator(mode: .firstRun, progress: OnboardingProgress())
         nav.advance()
         nav.advance()
-        nav.advance()
+        XCTAssertEqual(nav.step, .remoteAccess)
         XCTAssertTrue(nav.step.isOptional)
+        nav.advance()
         nav.advance()
         XCTAssertEqual(nav.step, .iPhone)
         nav.show(.done)

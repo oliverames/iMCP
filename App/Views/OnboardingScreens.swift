@@ -129,7 +129,7 @@ struct ServicesScreen: View {
         VStack(spacing: OnboardingSpacing.large) {
             ScreenTitle(
                 title: "Choose what AI apps can reach",
-                subtitle: "Every service starts off. Turn on the ones you want."
+                subtitle: "Turn on the services you want AI apps to use."
             )
 
             OnboardingGlassGroup(spacing: 12) {
@@ -157,9 +157,8 @@ struct ServicesScreen: View {
                     }
                 }
             }
-            .padding(OnboardingSpacing.medium)
+            .padding(.horizontal, OnboardingSpacing.medium)
             .frame(maxWidth: .infinity)
-            .modifier(OnboardingCardBackground())
 
             Caption("macOS asks for permission when each service turns on. Home stays off until you turn it on.")
         }
@@ -199,32 +198,64 @@ struct ServicesScreen: View {
 struct ConnectAppsScreen: View {
     @ObservedObject var model: OnboardingModel
 
+    /// The agents that connect over a public address, with how each adds a connector.
+    private static let cloudAgents: [(id: String, name: String, symbol: String, steps: (String) -> String)] = [
+        (
+            "claudeDuet", "Claude Duet", "person.2",
+            { _ in "Add a custom MCP connector, paste the URL, then approve once in iMCP." }
+        ),
+        ("muse", "Muse", "sparkles", { _ in "Add an MCP server with the URL. It signs in with OAuth 2.1." }),
+        (
+            "gemini", "Gemini", "diamond",
+            { url in "In Gemini CLI, run: gemini mcp add --transport http imcp \(url)" }
+        ),
+    ]
+
     var body: some View {
         // Read again after a setup panel closes.
         let _ = model.appsRevision
+        let publicURL = model.serverController.activePublicURLs.first?.url
 
         VStack(spacing: OnboardingSpacing.large) {
             ScreenTitle(
-                title: "Connect your AI apps",
-                subtitle: "Add iMCP to Claude on this Mac. Other apps can connect later from Settings."
+                title: "Connect your AI agent",
+                subtitle: "Add iMCP to Claude on this Mac, or copy your connector URL for Claude Duet, Muse and Gemini."
             )
 
             VStack(spacing: 0) {
                 appRow(
                     symbol: "macwindow",
                     name: "Claude Desktop",
+                    detail: nil,
                     isSetUp: ClaudeDesktop.isConfigured,
                     id: "claudeDesktop",
+                    buttonTitle: ClaudeDesktop.isConfigured ? "Set Up Again…" : "Set Up…",
                     action: model.setUpClaudeDesktop
                 )
                 Divider().padding(.horizontal, OnboardingSpacing.medium)
                 appRow(
                     symbol: "terminal",
                     name: "Claude Code",
+                    detail: nil,
                     isSetUp: ClaudeCode.isConfigured,
                     id: "claudeCode",
+                    buttonTitle: ClaudeCode.isConfigured ? "Set Up Again…" : "Set Up…",
                     action: model.setUpClaudeCode
                 )
+                ForEach(Self.cloudAgents, id: \.id) { agent in
+                    Divider().padding(.horizontal, OnboardingSpacing.medium)
+                    appRow(
+                        symbol: agent.symbol,
+                        name: agent.name,
+                        detail: publicURL.map(agent.steps)
+                            ?? "Needs a public address. Choose one in the previous step.",
+                        isSetUp: nil,
+                        id: agent.id,
+                        buttonTitle: "Copy URL",
+                        action: { if let publicURL { copyForOnboarding(publicURL) } },
+                        isEnabled: publicURL != nil
+                    )
+                }
             }
             .frame(maxWidth: OnboardingSpacing.column)
             .modifier(OnboardingCardBackground())
@@ -233,9 +264,17 @@ struct ConnectAppsScreen: View {
         }
     }
 
-    private func appRow(symbol: String, name: String, isSetUp: Bool, id: String, action: @escaping () -> Void)
-        -> some View
-    {
+    /// `isSetUp` is nil for an agent that connects from its own side, so there is nothing to check here.
+    private func appRow(
+        symbol: String,
+        name: String,
+        detail: String?,
+        isSetUp: Bool?,
+        id: String,
+        buttonTitle: String,
+        action: @escaping () -> Void,
+        isEnabled: Bool = true
+    ) -> some View {
         HStack(spacing: OnboardingSpacing.medium) {
             Image(systemName: symbol)
                 .font(.title2)
@@ -244,7 +283,13 @@ struct ConnectAppsScreen: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: OnboardingSpacing.tight) {
                 Text(name).font(.headline)
-                if isSetUp {
+                if let detail {
+                    Text(detail)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                } else if isSetUp == true {
                     Label("Set up", systemImage: "checkmark.circle.fill")
                         .font(.subheadline)
                         .foregroundStyle(.green)
@@ -255,8 +300,9 @@ struct ConnectAppsScreen: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Button(isSetUp ? "Set Up Again…" : "Set Up…", action: action)
+            Button(buttonTitle, action: action)
                 .onboardingSecondary()
+                .disabled(!isEnabled)
                 .accessibilityIdentifier("onboarding.setUp.\(id)")
         }
         .padding(OnboardingSpacing.medium)
@@ -270,7 +316,6 @@ struct RemoteAccessScreen: View {
     @ObservedObject var serverController: ServerController
     @ObservedObject var cloudflare: CloudflareTunnelController
     @Environment(\.openURL) private var openURL
-    @State private var showsAdvanced = false
 
     var body: some View {
         VStack(spacing: OnboardingSpacing.large) {
@@ -300,14 +345,19 @@ struct RemoteAccessScreen: View {
                 )
                 if model.remoteSelection == .funnel { checklist(TailscaleChecklist.items(model.tailscaleInputs)) }
                 Divider().padding(.horizontal, OnboardingSpacing.medium)
-                advancedRow
+                choiceRow(
+                    .cloudflare,
+                    title: "Cloudflare Tunnel",
+                    detail:
+                        "A public https address on your own domain. Needs a domain that is already on your Cloudflare account."
+                )
+                if model.remoteSelection == .cloudflare { cloudflareChecklist }
             }
             .frame(maxWidth: OnboardingSpacing.column)
             .modifier(OnboardingCardBackground())
 
             Caption("You can change this any time in Settings. Skipping keeps Local only.")
         }
-        .onAppear { showsAdvanced = model.remoteSelection == .cloudflare }
     }
 
     // MARK: Rows
@@ -339,40 +389,6 @@ struct RemoteAccessScreen: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("onboarding.remote.\(choice.rawValue)")
-    }
-
-    private var advancedRow: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                showsAdvanced.toggle()
-            } label: {
-                HStack {
-                    Text("Advanced")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Image(systemName: showsAdvanced ? "chevron.down" : "chevron.right")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .padding(OnboardingSpacing.medium)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Advanced options")
-            .accessibilityValue(showsAdvanced ? "Expanded" : "Collapsed")
-            .accessibilityIdentifier("onboarding.remote.advanced")
-
-            if showsAdvanced {
-                choiceRow(
-                    .cloudflare,
-                    title: "Cloudflare Tunnel",
-                    detail:
-                        "A public https address on your own domain. Needs a domain that is already on your Cloudflare account."
-                )
-                if model.remoteSelection == .cloudflare { cloudflareChecklist }
-            }
-        }
     }
 
     // MARK: Checklists

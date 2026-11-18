@@ -23,10 +23,12 @@ enum OnboardingStep: String, Equatable, Sendable, CaseIterable {
     case welcome
     /// Which services AI apps can reach.
     case services
-    /// Adding iMCP to Claude Desktop and Claude Code.
-    case connectApps
-    /// Optional: how AI apps reach this Mac from outside.
+    /// Optional: how AI apps reach this Mac from outside. Comes before the apps,
+    /// because the cloud agents need the public address it sets up.
     case remoteAccess
+    /// Adding iMCP to Claude Desktop and Claude Code, and the connector URL for
+    /// Claude Duet, Muse and Gemini.
+    case connectApps
     /// Optional: pairing an iPhone or iPad.
     case iPhone
     case done
@@ -58,7 +60,7 @@ struct OnboardingProgress: Equatable, Sendable {
 /// person who skipped a step never lands on it by going back.
 struct OnboardingNavigator: Equatable, Sendable {
     /// The guided screens after the Welcome, in order.
-    static let guidedSteps: [OnboardingStep] = [.services, .connectApps, .remoteAccess, .iPhone, .done]
+    static let guidedSteps: [OnboardingStep] = [.services, .remoteAccess, .connectApps, .iPhone, .done]
 
     let mode: OnboardingMode
     private(set) var step: OnboardingStep
@@ -94,9 +96,9 @@ struct OnboardingNavigator: Equatable, Sendable {
     static func step(after step: OnboardingStep) -> OnboardingStep {
         switch step {
         case .welcome: return .services
-        case .services: return .connectApps
-        case .connectApps: return .remoteAccess
-        case .remoteAccess: return .iPhone
+        case .services: return .remoteAccess
+        case .remoteAccess: return .connectApps
+        case .connectApps: return .iPhone
         case .iPhone: return .done
         case .done: return .done
         }
