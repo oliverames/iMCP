@@ -29,12 +29,12 @@ struct ClientsSettingsView: View {
                 }
                 if let publicURL {
                     ExpandableRow(isExpanded: expansion(of: "connectorAddress")) {
-                        LabeledContent {
-                            Button("Copy") { copyToSettingsPasteboard(publicURL) }
-                        } label: {
+                        HStack {
                             RowLabel(title: "Connector address", subtitle: publicURL) {
                                 SettingsIcon(symbol: "link", color: .teal)
                             }
+                            Spacer(minLength: 8)
+                            Button("Copy") { copyToSettingsPasteboard(publicURL) }
                         }
                     } content: {
                         Text(
@@ -105,16 +105,14 @@ struct ClientsSettingsView: View {
         let mode = serverController.approvalMode
         let instruction = mode.agentInstructions.first { $0.id == client.instructionID }
         return ExpandableRow(isExpanded: expansion(of: client.id)) {
-            LabeledContent {
-                clientAction(client, publicURL: publicURL)
-            } label: {
-                HStack(spacing: 10) {
-                    ClientLogo(client: client, size: 32)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(client.name)
-                        clientStatus(client, hasAddress: publicURL != nil)
-                    }
+            HStack(spacing: 10) {
+                ClientLogo(client: client, size: 32)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(client.name)
+                    clientStatus(client, hasAddress: publicURL != nil)
                 }
+                Spacer(minLength: 8)
+                clientAction(client, publicURL: publicURL)
             }
         } content: {
             VStack(alignment: .leading, spacing: 8) {
