@@ -31,7 +31,7 @@ struct ClientsSettingsView: View {
                     ExpandableRow(isExpanded: expansion(of: "connectorAddress")) {
                         HStack {
                             RowLabel(title: "Connector address", subtitle: publicURL) {
-                                SettingsIcon(symbol: "link", color: .teal, size: 32)
+                                SettingsIcon(symbol: "link", color: .teal)
                             }
                             Spacer(minLength: 8)
                             Button("Copy") { copyToSettingsPasteboard(publicURL) }
@@ -48,7 +48,7 @@ struct ClientsSettingsView: View {
                         Button("Open Remote Access") { tab = .remoteAccess }
                     } label: {
                         RowLabel(title: "Cloud apps need a public address") {
-                            SettingsIcon(symbol: "network", color: .orange, size: 32)
+                            SettingsIcon(symbol: "network", color: .orange)
                         }
                     }
                 }
@@ -106,7 +106,7 @@ struct ClientsSettingsView: View {
         let instruction = mode.agentInstructions.first { $0.id == client.instructionID }
         return ExpandableRow(isExpanded: expansion(of: client.id)) {
             HStack(spacing: 10) {
-                ClientLogo(client: client, size: 32)
+                ClientLogo(client: client)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(client.name)
                     clientStatus(client, hasAddress: publicURL != nil)
