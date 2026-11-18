@@ -88,7 +88,8 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.styleMask = [.titled, .closable, .resizable]
         window.isReleasedWhenClosed = false
         window.title = "Set Up iMCP"
-        window.setContentSize(NSSize(width: 560, height: 600))
+        window.contentMinSize = NSSize(width: 720, height: 480)
+        window.setContentSize(NSSize(width: 880, height: 560))
         return window
     }
 

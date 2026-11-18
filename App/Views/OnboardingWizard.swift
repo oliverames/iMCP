@@ -4,8 +4,9 @@ import SwiftUI
 
 /// Guided setup for services, remote tunnels, iPhone pairing, approvals, and connecting AI apps.
 ///
-/// Each step is a grouped `Form`. The title bar shows the step, and Back and Continue are at the bottom. Everything here is also in Settings;
-/// the assistant only puts the first-run choices in order.
+/// A sidebar lists the steps, and the detail pane shows the current step as grouped `Form`s,
+/// side by side where the window is wide. Back and Continue are in a footer, as glass buttons on macOS 26.
+/// Everything here is also in Settings; the assistant only puts the first-run choices in order.
 struct OnboardingWizardView: View {
     @ObservedObject var serverController: ServerController
     @Binding var isEnabled: Bool
@@ -33,37 +34,67 @@ struct OnboardingWizardView: View {
         var title: String {
             switch self {
             case .services: "Services"
-            case .remote: "Remote"
-            case .mobile: "iPhone"
+            case .remote: "Remote Access"
+            case .mobile: "iPhone & iPad"
             case .approvals: "Approvals"
-            case .apps: "Apps"
+            case .apps: "Connect Apps"
+            }
+        }
+
+        var symbol: String {
+            switch self {
+            case .services: "switch.2"
+            case .remote: "network"
+            case .mobile: "iphone"
+            case .approvals: "checkmark.shield"
+            case .apps: "app.connected.to.app.below.fill"
             }
         }
     }
 
     var body: some View {
-        Group {
-            switch step {
-            case .services:
-                ServicesStepView(serverController: serverController, isEnabled: $isEnabled)
-            case .remote:
-                RemoteStepView(serverController: serverController, cloudflare: serverController.cloudflareTunnel)
-            case .mobile:
-                MobileStepView()
-            case .approvals:
-                ApprovalsStepView(serverController: serverController)
-            case .apps:
-                AppsStepView(serverController: serverController)
+        NavigationSplitView {
+            List(Step.allCases, selection: stepSelection) { item in
+                Label {
+                    Text(item.title)
+                } icon: {
+                    Image(systemName: item.rawValue < step.rawValue ? "checkmark.circle.fill" : item.symbol)
+                }
+                .tag(item)
             }
+            .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
+        } detail: {
+            detail
+                .formStyle(.grouped)
+                .navigationTitle("Set Up iMCP")
+                .navigationSubtitle("\(step.title), step \(step.rawValue + 1) of \(Step.allCases.count)")
+                .modifier(WizardScrollEdge())
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    WizardFooter(step: $step, onFinish: onFinish)
+                }
         }
-        .formStyle(.grouped)
-        .navigationTitle("Set Up iMCP")
-        .navigationSubtitle("Step \(step.rawValue + 1) of \(Step.allCases.count): \(step.title)")
-        .modifier(WizardScrollEdge())
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            WizardFooter(step: $step, onFinish: onFinish)
+        .frame(minWidth: 720, idealWidth: 880, minHeight: 480, idealHeight: 560)
+    }
+
+    /// The sidebar can deselect; the assistant always has a step.
+    private var stepSelection: Binding<Step?> {
+        Binding(get: { step }, set: { if let value = $0 { step = value } })
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch step {
+        case .services:
+            ServicesStepView(serverController: serverController, isEnabled: $isEnabled)
+        case .remote:
+            RemoteStepView(serverController: serverController, cloudflare: serverController.cloudflareTunnel)
+        case .mobile:
+            MobileStepView()
+        case .approvals:
+            ApprovalsStepView(serverController: serverController)
+        case .apps:
+            AppsStepView(serverController: serverController)
         }
-        .frame(minWidth: 520, idealWidth: 560, minHeight: 440, idealHeight: 600)
     }
 }
 
@@ -143,48 +174,74 @@ private struct WizardScrollEdge: ViewModifier {
 private struct ServicesStepView: View {
     @ObservedObject var serverController: ServerController
     @Binding var isEnabled: Bool
+    @State private var width: CGFloat = 700
 
     var body: some View {
         let configs = serverController.computedServiceConfigs
 
-        Form {
-            Section {
-                Toggle("Enable MCP Server", isOn: $isEnabled)
-            } footer: {
-                Text("AI apps can use iMCP only while the server is on.")
-            }
-
-            Section {
-                ForEach(configs) { config in
-                    Toggle(
-                        isOn: Binding(
-                            get: { config.binding.wrappedValue },
-                            set: { serverController.setService(config, enabled: $0) }
+        ScrollView {
+            VStack(spacing: 0) {
+                Form {
+                    Section {
+                        Toggle("Enable MCP Server", isOn: $isEnabled)
+                        LabeledContent("Recommended services") {
+                            Button("Turn On All") {
+                                isEnabled = true
+                                for config in configs where !(config.service is HomeService) {
+                                    if !config.binding.wrappedValue {
+                                        serverController.setService(config, enabled: true)
+                                    }
+                                }
+                            }
+                        }
+                        .disabled(!isEnabled)
+                    } footer: {
+                        Text(
+                            "AI apps can use iMCP only while the server is on. macOS asks for permission the first time each service turns on. Home stays off until you turn it on yourself."
                         )
-                    ) {
-                        Label(config.name, systemImage: config.iconName)
                     }
                 }
-            } header: {
-                HStack {
-                    Text("Services")
-                    Spacer()
-                    Button("Turn On All Recommended") {
-                        isEnabled = true
-                        for config in configs where !(config.service is HomeService) {
-                            if !config.binding.wrappedValue {
-                                serverController.setService(config, enabled: true)
+                .scrollDisabled(true)
+                .fixedSize(horizontal: false, vertical: true)
+
+                // Three columns when the window is wide, two when it is narrower.
+                columns(of: configs, count: width >= 630 ? 3 : width >= 420 ? 2 : 1)
+                    .disabled(!isEnabled)
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .onGeometryChange(for: CGFloat.self) {
+            $0.size.width
+        } action: {
+            width = $0
+        }
+    }
+
+    private func columns(of configs: [ServiceConfig], count: Int) -> some View {
+        let size = (configs.count + count - 1) / count
+        let chunks = stride(from: 0, to: configs.count, by: size).map {
+            Array(configs[$0 ..< min($0 + size, configs.count)])
+        }
+        return HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(chunks.enumerated()), id: \.offset) { _, chunk in
+                Form {
+                    Section {
+                        ForEach(chunk) { config in
+                            Toggle(
+                                isOn: Binding(
+                                    get: { config.binding.wrappedValue },
+                                    set: { serverController.setService(config, enabled: $0) }
+                                )
+                            ) {
+                                Label(config.name, systemImage: config.iconName)
                             }
                         }
                     }
-                    .controlSize(.small)
                 }
-            } footer: {
-                Text(
-                    "macOS asks for permission the first time each service turns on. Home stays off until you turn it on yourself."
-                )
+                .scrollDisabled(true)
+                .fixedSize(horizontal: false, vertical: true)
+
             }
-            .disabled(!isEnabled)
         }
     }
 }
@@ -197,16 +254,18 @@ private struct RemoteStepView: View {
     @Environment(\.openURL) private var openURL
 
     var body: some View {
-        Form {
-            Section {
-                Text(
-                    "Cloud apps such as claude.ai, Claude Duet, and Muse reach your Mac over an encrypted HTTPS tunnel and OAuth. This is optional; skip it if you only use apps on this Mac."
-                )
-                .foregroundStyle(.secondary)
-            }
+        VStack(spacing: 0) {
+            Text(
+                "Cloud apps such as claude.ai, Claude Duet, and Muse reach your Mac over an encrypted HTTPS tunnel and OAuth. This is optional; skip it if you only use apps on this Mac."
+            )
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding([.horizontal, .top], 20)
 
-            cloudflareSection
-            tailscaleSection
+            HStack(alignment: .top, spacing: 0) {
+                Form { cloudflareSection }
+                Form { tailscaleSection }
+            }
         }
     }
 
@@ -349,65 +408,70 @@ private struct MobileStepView: View {
     @State private var pairingError: String?
 
     var body: some View {
-        Form {
-            Section {
-                if pairedDevices.isEmpty {
-                    Text("No iPhone or iPad is paired yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(pairedDevices) { device in
-                        let isConnected = connectedDevice?.id == device.id
-                        LabeledContent {
-                            Text(isConnected ? "Connected" : "Paired")
-                        } label: {
-                            Label(device.name, systemImage: isConnected ? "iphone.radiowaves.left.and.right" : "iphone")
+        HStack(alignment: .top, spacing: 0) {
+            Form {
+                Section {
+                    if pairedDevices.isEmpty {
+                        Text("No iPhone or iPad is paired yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(pairedDevices) { device in
+                            let isConnected = connectedDevice?.id == device.id
+                            LabeledContent {
+                                Text(isConnected ? "Connected" : "Paired")
+                            } label: {
+                                Label(
+                                    device.name,
+                                    systemImage: isConnected ? "iphone.radiowaves.left.and.right" : "iphone"
+                                )
+                            }
                         }
                     }
+
+                    if pairingCode == nil {
+                        LabeledContent("Pair a device") {
+                            Button(pairedDevices.isEmpty ? "Pair…" : "Pair Another…") {
+                                beginPairing()
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Devices")
+                } footer: {
+                    Text(
+                        "The iMCP app for iPhone shares Health and Alarms, shows every tool call, and lets you approve requests from your phone."
+                    )
                 }
 
-                if pairingCode == nil {
-                    LabeledContent {
-                        Button(pairedDevices.isEmpty ? "Pair…" : "Pair Another…") {
-                            beginPairing()
-                        }
-                    } label: {
-                        Text("Pair a device")
+                if let pairingError {
+                    Section {
+                        Label(pairingError, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
                     }
                 }
-            } header: {
-                Text("Devices")
-            } footer: {
-                Text(
-                    "The iMCP app for iPhone shares Health and Alarms, shows every tool call, and lets you approve requests from your phone."
-                )
             }
 
             if let pairingCode, let pairingExpires {
-                Section {
-                    if let qr = qrImage(pairingCode.url.absoluteString) {
-                        Image(nsImage: qr)
-                            .interpolation(.none)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: 200)
-                            .frame(maxWidth: .infinity)
-                            .accessibilityLabel("Pairing code")
+                Form {
+                    Section {
+                        if let qr = qrImage(pairingCode.url.absoluteString) {
+                            Image(nsImage: qr)
+                                .interpolation(.none)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxWidth: 200)
+                                .frame(maxWidth: .infinity)
+                                .accessibilityLabel("Pairing code")
+                        }
+                        LabeledContent("Expires") {
+                            Text(pairingExpires, format: .dateTime.hour().minute())
+                        }
+                        LabeledContent("Pairing link") {
+                            Button("Copy") { copyToPasteboard(pairingCode.url.absoluteString) }
+                        }
+                    } header: {
+                        Text("Scan in the iMCP app")
                     }
-                    LabeledContent("Expires") {
-                        Text(pairingExpires, format: .dateTime.hour().minute())
-                    }
-                    LabeledContent("Pairing link") {
-                        Button("Copy") { copyToPasteboard(pairingCode.url.absoluteString) }
-                    }
-                } header: {
-                    Text("Scan in the iMCP app")
-                }
-            }
-
-            if let pairingError {
-                Section {
-                    Label(pairingError, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.red)
                 }
             }
         }

@@ -21,6 +21,7 @@
             let directory = URL(fileURLWithPath: String(argument.dropFirst(prefix.count)))
 
             Task { @MainActor in
+                let suffix = ProcessInfo.processInfo.arguments.contains("--snapshot-min") ? "-min" : ""
                 let only = ProcessInfo.processInfo.arguments.contains("--snapshot-dark")
                 for appearance in only ? [NSAppearance.Name.darkAqua] : [.aqua] {
                     let name = appearance == .aqua ? "light" : "dark"
@@ -55,6 +56,9 @@
                         )
                         let window = OnboardingWindowController.makeWindow(rootView: AnyView(view))
                         window.appearance = NSAppearance(named: appearance)
+                        if ProcessInfo.processInfo.arguments.contains("--snapshot-min") {
+                            window.setContentSize(window.contentMinSize)
+                        }
                         window.center()
                         window.makeKeyAndOrderFront(nil)
                         try? await Task.sleep(for: .seconds(1.5))
@@ -63,7 +67,11 @@
                         {
                             frame.cacheDisplay(in: frame.bounds, to: rep)
                             try? rep.representation(using: .png, properties: [:])?
-                                .write(to: directory.appending(path: "onboarding-step\(step.rawValue + 1)-\(name).png"))
+                                .write(
+                                    to: directory.appending(
+                                        path: "onboarding-step\(step.rawValue + 1)-\(name)\(suffix).png"
+                                    )
+                                )
                         }
                         window.orderOut(nil)
                     }
