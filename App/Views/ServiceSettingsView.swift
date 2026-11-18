@@ -190,6 +190,7 @@ private struct WritesSection: View {
     let name: String
     @AppStorage private var isWriteEnabled: Bool
     @AppStorage(ApprovalMode.defaultsKey) private var approvalModeRawValue = ApprovalMode.defaultMode.rawValue
+    @AppStorage(MusicPlaylistWrites.settingKey) private var isPlaylistWriteEnabled = false
 
     init(serverController: ServerController, service: any Service, name: String) {
         self.serverController = serverController
@@ -214,6 +215,10 @@ private struct WritesSection: View {
                     serverController.objectWillChange.send()
                     serverController.toolListChanged()
                 }
+            if service is MusicService {
+                Toggle("Allow playlist changes", isOn: $isPlaylistWriteEnabled)
+                    .disabled(!isWriteEnabled && !approvalMode.bypassesServiceWriteToggles)
+            }
         } footer: {
             Text(footer)
         }
@@ -229,6 +234,10 @@ private struct WritesSection: View {
         if service is NotesService {
             text +=
                 " In Notes they can create, edit, move, and delete notes and folders. Deleted notes go to Recently Deleted. An edit replaces a note's text and is refused if the note changed since the client read it. The first time, macOS asks whether iMCP may control Notes."
+        }
+        if service is MusicService {
+            text +=
+                " Playlist tools also need \"Allow playlist changes\", which is off until you turn it on. They can create playlists and add or remove tracks, and never delete a playlist."
         }
         return text
     }
