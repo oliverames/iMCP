@@ -23,14 +23,15 @@
             var tabs: [String] =
                 SettingsPane.tabs.map(\.rawValue)
                 + [
-                    "sidebar", "service-NotesService", "service-CalendarService",
+                    "remoteAccess-tailscale", "remoteAccess-funnel", "remoteAccess-cloudflare", "sidebar",
+                    "service-NotesService", "service-CalendarService",
                 ]
             if let tab = arguments.first(where: { $0.hasPrefix("--settings-tab=") }) {
                 tabs = [String(tab.dropFirst("--settings-tab=".count))]
             }
             var sizes: [(String, NSSize)] = [
-                ("default", SettingsWindowConfigurator.defaultSize),
-                ("min", SettingsWindowConfigurator.minimumSize),
+                ("default", SettingsWindowMetrics.defaultSize),
+                ("min", SettingsWindowMetrics.minimumSize),
                 ("large", NSSize(width: 1100, height: 800)),
             ]
             if let size = arguments.first(where: { $0.hasPrefix("--settings-size=") }) {
@@ -82,9 +83,11 @@
             else { return nil }
             let cg = context.cgContext
             cg.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
-            // Flip, as layers draw with the origin at the top left.
-            cg.translateBy(x: 0, y: view.bounds.height)
-            cg.scaleBy(x: 1, y: -1)
+            // A flipped view's layer draws with the origin at the top left. The window's frame view does not.
+            if view.isFlipped {
+                cg.translateBy(x: 0, y: view.bounds.height)
+                cg.scaleBy(x: 1, y: -1)
+            }
             layer.render(in: cg)
             return rep
         }
@@ -98,10 +101,10 @@
             updater: SPUUpdater,
             directory: URL
         ) async {
-            let root: AnyView
+            let window: NSWindow
             if tab == "sidebar" {
-                // The sidebar list on its own, since the full window leaves it out of a snapshot.
-                root = AnyView(
+                // The sidebar list on its own, for comparison with the full window.
+                let root = AnyView(
                     List(selection: .constant(SettingsPane.clients)) {
                         ForEach(SettingsPane.tabs, id: \.self) { tab in
                             Label(tab.title, systemImage: tab.symbol).tag(tab)
@@ -119,47 +122,78 @@
                     }
                     .listStyle(.sidebar)
                 )
-            } else if tab.hasPrefix("service-") {
-                let id = String(tab.dropFirst("service-".count))
-                guard let config = serverController.computedServiceConfigs.first(where: { $0.id == id }) else {
-                    return
-                }
-                root = AnyView(
-                    NavigationStack {
-                        ServiceSettingsView(serverController: serverController, config: config)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                window = NSWindow(
+                    contentRect: NSRect(origin: .zero, size: size),
+                    styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+                    backing: .buffered,
+                    defer: false
                 )
+                window.contentView = NSHostingView(rootView: root)
             } else {
-                UserDefaults.standard.set(tab, forKey: "settingsPane")
-                root = AnyView(
-                    SettingsView(serverController: serverController, isMenuBarExtraInserted: true, updater: updater)
-                )
+                // The real Settings window, as the app builds it.
+                var pane = tab.hasPrefix("service-") ? String(tab.dropFirst("service-".count)) : tab
+                // "remoteAccess-cloudflare" shows that way's checklist.
+                UserDefaults.standard.removeObject(forKey: "debugRemoteSelection")
+                if pane.hasPrefix("remoteAccess-") {
+                    UserDefaults.standard.set(
+                        String(pane.dropFirst("remoteAccess-".count)),
+                        forKey: "debugRemoteSelection"
+                    )
+                    pane = "remoteAccess"
+                }
+                UserDefaults.standard.set(pane, forKey: "settingsPane")
+                guard let made = SettingsWindowController.shared.makeWindow(restoresFrame: false) else { return }
+                window = made
             }
-            let window = NSWindow(
-                contentRect: NSRect(origin: .zero, size: size),
-                styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
-                backing: .buffered,
-                defer: false
-            )
             window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
-            window.contentView = NSHostingView(rootView: root)
             window.setContentSize(size)
-            window.backgroundColor = .windowBackgroundColor
             NSApp.setActivationPolicy(.regular)
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: .seconds(2.5))
             window.contentView?.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            if let view = window.contentView {
-                let name = "\(tab)-\(sizeName)-\(isDark ? "dark" : "light").png"
-                // View drawing leaves out the sidebar's list, so draw the layer tree.
+            // The frame view includes the title bar and toolbar. The content view alone leaves them out.
+            if let view = window.contentView?.superview ?? window.contentView {
+                let name = "\(tab)-\(sizeName)-\(isDark ? "dark" : "light")"
                 if let rep = layerImage(of: view) {
-                    try? rep.representation(using: .png, properties: [:])?.write(to: directory.appending(path: name))
+                    try? rep.representation(using: .png, properties: [:])?
+                        .write(to: directory.appending(path: name + ".png"))
+                    if tab != "sidebar" {
+                        let result = bandCheck(rep, window: window)
+                        let line =
+                            "\(name): first content \(result.offset) pt below the toolbar, \(result.offset < 60 ? "PASS" : "FAIL")\n"
+                        if let handle = try? FileHandle(forWritingTo: directory.appending(path: "band-check.txt")) {
+                            handle.seekToEndOfFile()
+                            handle.write(Data(line.utf8))
+                            try? handle.close()
+                        }
+                    }
                 }
             }
             window.orderOut(nil)
+        }
+
+        /// How far below the toolbar the first content starts in the detail pane, in points.
+        /// A tall blank band means the layout reserved space it does not use.
+        private static func bandCheck(_ rep: NSBitmapImageRep, window: NSWindow) -> (offset: Int, found: Bool) {
+            let scale = 2
+            let toolbarBottom = Int(window.frame.height - window.contentLayoutRect.height)
+            let width = rep.pixelsWide
+            let columns = stride(from: Int(Double(width) * 0.5), to: Int(Double(width) * 0.85), by: 6).map { $0 }
+            let gutter = width - 6
+            for y in (toolbarBottom + 1) * scale ..< rep.pixelsHigh {
+                guard let reference = rep.colorAt(x: gutter, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                for x in columns {
+                    guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                    let difference =
+                        abs(color.redComponent - reference.redComponent)
+                        + abs(color.greenComponent - reference.greenComponent)
+                        + abs(color.blueComponent - reference.blueComponent)
+                    if difference > 0.03 { return (y / scale - toolbarBottom, true) }
+                }
+            }
+            return (9999, false)
         }
     }
 #endif
