@@ -337,6 +337,23 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         }
 
         Tool(
+            name: "notes_smart_folders",
+            description:
+                "List the smart folders in the Notes app, with the rules that select their notes. Smart folders collect notes by a query and hold none of their own, so notes_folders leaves them out. rules is the stored query without the clause that keeps Recently Deleted out; query is the stored text as is.",
+            inputSchema: .object(
+                properties: [:],
+                additionalProperties: false
+            ),
+            annotations: .init(
+                title: "List Smart Folders",
+                readOnlyHint: true,
+                openWorldHint: false
+            )
+        ) { _ in
+            try await self.smartFoldersResult()
+        }
+
+        Tool(
             name: "notes_tags",
             description:
                 "List the tags (#hashtags) used in the Notes app, with how many notes carry each one, most used first. Reads the contents of the most recently edited notes, up to scanLimit, and says when it stopped before the oldest notes. Notes in Recently Deleted and locked notes are skipped.",
@@ -359,6 +376,25 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         ) { arguments in
             try await self.tagsResult(arguments)
         }
+    }
+
+    private func smartFoldersResult() async throws -> Value {
+        try checkDatabaseAccess()
+        let (smartFolders, folders): ([TopoText.SmartFolder], [TopoText.Folder]) = try await withStore { store in
+            try await store.withSnapshot { snapshot in
+                let smartFolders = try snapshot.smartFolders()
+                let folders = try snapshot.folders()
+                return (smartFolders, folders)
+            }
+        }
+        let names = Dictionary(folders.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return .object([
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            "name": "Smart Folders",
+            "numberOfItems": .int(smartFolders.count),
+            "itemListElement": .array(smartFolders.map { smartFolderValue($0, folderNames: names) }),
+        ])
     }
 
     // MARK: - Database Access
