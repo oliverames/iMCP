@@ -28,34 +28,33 @@ struct App: SwiftUI.App {
         #endif
     }
 
+    private func installMenuBar() {
+        MenuBarController.shared.install(serverController: serverController, updater: updaterController.updater)
+    }
+
     var body: some Scene {
         @Bindable var appDelegate = appDelegate
 
-        // The binding lets removal hide the item without terminating the server.
-        MenuBarExtra(
-            isInserted: $appDelegate.isMenuBarExtraInserted
-        ) {
-            ContentView(
-                serverManager: serverController,
-                isEnabled: $isEnabled,
-                updater: updaterController.updater
-            )
-        } label: {
-            HStack(spacing: 3) {
-                Image(#"MenuIcon-\#(isEnabled ? "On" : "Off")"#)
-                #if DEBUG
-                    Text("DEV")
-                        .font(.system(size: 9, weight: .heavy, design: .rounded))
-                #endif
-            }
+        // The menu bar item is `MenuBarController`'s status item, because a `MenuBarExtra` window has
+        // corners that are rounder than a native menu's. This never-inserted scene only carries the
+        // app-level handlers below.
+        MenuBarExtra("iMCP", systemImage: "circle", isInserted: .constant(false)) {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+        .onChange(of: isEnabled, initial: true) { _, isEnabled in
+            installMenuBar()
+            MenuBarController.shared.updateIcon(isOn: isEnabled)
+        }
         .onChange(of: isEnabled) { _, isEnabled in
             // The panel's content isn't alive while it is closed, and the Setup Assistant changes this too.
             Task { await serverController.setEnabled(isEnabled) }
         }
         .onChange(of: showMenuBarExtra) { _, showMenuBarExtra in
             appDelegate.isMenuBarExtraInserted = showMenuBarExtra
+        }
+        .onChange(of: appDelegate.isMenuBarExtraInserted, initial: true) { _, inserted in
+            installMenuBar()
+            MenuBarController.shared.setVisible(inserted)
         }
         .onChange(of: appDelegate.shouldOpenSettings, initial: true) { _, shouldOpenSettings in
             guard shouldOpenSettings else { return }

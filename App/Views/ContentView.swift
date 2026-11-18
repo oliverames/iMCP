@@ -5,14 +5,13 @@ import SwiftUI
 
 /// The menu bar panel.
 ///
-/// It is a window-style `MenuBarExtra`, not an `NSMenu`, because a menu closes after every click
+/// It is a panel from ``MenuBarController``, not an `NSMenu`, because a menu closes after every click
 /// and the service rows must stay open while people turn several on or off.
 /// Spacing follows a native menu: 22 pt rows, 4 pt around separators, and the system accent color
 /// for the hover highlight, as a native menu draws it. The items come from ``MenuStructure``.
 struct ContentView: View {
     @ObservedObject var serverController: ServerController
     @Binding var isEnabled: Bool
-    @Environment(\.dismiss) private var dismiss
 
     private let updater: SPUUpdater
     @State private var menuPanel = MenuPanelController()
@@ -164,9 +163,7 @@ struct ContentView: View {
         case .quit:
             NSApplication.shared.terminate(nil)
         }
-        // Hiding the panel window directly leaves the status item presented,
-        // so the next click on it does nothing.
-        dismiss()
+        MenuBarController.shared.close()
     }
 }
 
@@ -186,7 +183,7 @@ enum MenuMetrics {
     static let panelRadius: CGFloat = 10
 }
 
-/// Resizes the `MenuBarExtra` panel that shows ``ContentView`` to fit its content.
+/// Resizes the panel that shows ``ContentView`` to fit its content, keeping its top edge in place.
 @MainActor
 final class MenuPanelController {
     var contentHeight: CGFloat = 0
@@ -228,37 +225,10 @@ final class MenuPanelController {
         ) { _ in
             MainActor.assumeIsolated { ActivityFlyout.shared.hide() }
         }
-        roundCorners(of: newWindow)
         resizeToFitContent()
     }
 
-    /// The system draws this panel with a larger corner radius than a native menu has.
-    /// Set the layers that carry a rounded shape to the native radius, and log what was found.
-    private func roundCorners(of window: NSWindow) {
-        DispatchQueue.main.async { [weak self, weak window] in
-            guard let self, let window, let root = window.contentView?.superview ?? window.contentView else {
-                return
-            }
-            var found: [String] = []
-            func visit(_ view: NSView) {
-                if let layer = view.layer, layer.cornerRadius > MenuMetrics.panelRadius + 1 {
-                    found.append("\(type(of: view)) \(layer.cornerRadius)")
-                    layer.cornerRadius = MenuMetrics.panelRadius
-                    layer.cornerCurve = .continuous
-                }
-                view.subviews.forEach(visit)
-            }
-            visit(root)
-            self.log.notice(
-                "corner radius: set \(found.count, privacy: .public) layers to \(MenuMetrics.panelRadius, privacy: .public): \(found.joined(separator: ", "), privacy: .public)"
-            )
-        }
-    }
-
-    // MenuBarExtra's window keeps a stale taller frame when its content shrinks,
-    // leaving the content vertically centered in an oversized panel. Resize the height to fit.
-    // The width is the system's: it puts a changed width back, so the content fills whatever
-    // width the window has instead (see `ContentView.body`).
+    // The panel's height follows its content; its width is fixed.
     func resizeToFitContent() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window, self.contentHeight > 0 else { return }
