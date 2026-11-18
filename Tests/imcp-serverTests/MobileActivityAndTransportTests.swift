@@ -272,9 +272,9 @@ final class MobileActivityAndTransportTests: XCTestCase {
             ),
             [
                 .bonjour(service: "iMCP on Mac"),
+                .cloudflare(url: URL(string: "wss://tunnel.example.com/mobile")!),
                 .tailscaleVPN(host: "100.64.0.5", port: MobileLink.defaultRemotePort),
                 .tailscaleFunnel(url: URL(string: "wss://mac.ts.net/mobile")!),
-                .cloudflare(url: URL(string: "wss://tunnel.example.com/mobile")!),
             ]
         )
 

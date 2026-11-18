@@ -336,15 +336,17 @@ extension MobileTransportMode {
             guard let parsedCloudflare else { return [] }
             return [.cloudflare(url: parsedCloudflare)]
         case .automatic:
+            // Nearby first, then Cloudflare, which works from any network and needs nothing on the phone,
+            // then the Tailscale routes, which need Tailscale running on both devices.
             var list: [MobileTransportCandidate] = [.bonjour(service: service)]
+            if let parsedCloudflare {
+                list.append(.cloudflare(url: parsedCloudflare))
+            }
             if let validHost {
                 list.append(.tailscaleVPN(host: validHost, port: effectivePort))
             }
             if let parsedFunnel {
                 list.append(.tailscaleFunnel(url: parsedFunnel))
-            }
-            if let parsedCloudflare {
-                list.append(.cloudflare(url: parsedCloudflare))
             }
             return list
         }
