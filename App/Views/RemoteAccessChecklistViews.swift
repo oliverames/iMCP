@@ -40,7 +40,14 @@ struct TailscaleChecklistView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if compact {
-                CompactChecklist(items: TailscaleChecklist.items(inputs), openLink: open) { _ in EmptyView() }
+                CompactChecklist(
+                    items: TailscaleChecklist.items(inputs),
+                    openLink: open,
+                    doneTitle: "Tailscale is on",
+                    doneSymbol: "lock.shield",
+                    doneColor: .indigo,
+                    inline: { _ in EmptyView() }
+                )
             } else {
                 ForEach(TailscaleChecklist.items(inputs)) { item in
                     ChecklistRow(
@@ -100,8 +107,10 @@ struct CloudflareChecklistView: View {
                 CompactChecklist(
                     items: items,
                     openLink: { _, url in openURL(url) },
-                    doneTitle: cloudflare.state.activeURL == nil ? "All set" : "Connected",
+                    doneTitle: cloudflare.state.activeURL == nil ? "Ready" : "Tunnel is on",
                     doneSubtitle: cloudflare.state.activeURL,
+                    doneSymbol: "cloud.fill",
+                    doneColor: .orange,
                     inline: { item in
                         if item.kind == .signIn, cloudflare.account == nil {
                             signInControls
@@ -110,20 +119,41 @@ struct CloudflareChecklistView: View {
                 )
                 if cloudflare.account != nil {
                     if cloudflare.zones.count > 1 {
-                        Picker("Domain", selection: $cloudflare.selectedZoneID) {
-                            ForEach(cloudflare.zones) { zone in Text(zone.name).tag(zone.id) }
+                        LabeledContent {
+                            Picker("Domain", selection: $cloudflare.selectedZoneID) {
+                                ForEach(cloudflare.zones) { zone in Text(zone.name).tag(zone.id) }
+                            }
+                            .labelsHidden()
+                        } label: {
+                            RowLabel(title: "Domain") { SettingsIcon(symbol: "globe", color: .blue) }
                         }
                     }
-                    LabeledContent("Hostname") {
+                    LabeledContent {
                         TextField(
-                            "Hostname",
+                            "Address",
                             text: $cloudflare.hostnameDraft,
                             prompt: Text("imcp.\(cloudflare.selectedZone?.name ?? "example.com")")
                         )
                         .labelsHidden()
                         .multilineTextAlignment(.trailing)
                         .accessibilityIdentifier("onboarding.cloudflare.hostname")
+                    } label: {
+                        RowLabel(title: "Address") { SettingsIcon(symbol: "link", color: .teal) }
                     }
+                }
+                if case .failed(let reason) = cloudflare.state {
+                    RowLabel(title: "Couldn't connect", subtitle: reason) {
+                        SettingsIcon(symbol: "exclamationmark.triangle.fill", color: .red)
+                    }
+                }
+                if cloudflare.state.activeURL == nil, CloudflareChecklist.isReady(items) {
+                    Button {
+                        Task { await cloudflare.provisionAndConnect() }
+                    } label: {
+                        RowLabel(title: "Set up the tunnel") { SettingsIcon(symbol: "bolt.fill", color: .green) }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("onboarding.cloudflare.setUp")
                 }
             } else {
                 ForEach(items) { item in
@@ -150,19 +180,19 @@ struct CloudflareChecklistView: View {
                 }
             }
 
-            if let url = cloudflare.state.activeURL, !(compact && items.allSatisfy(\.isDone)) {
+            if !compact, let url = cloudflare.state.activeURL {
                 Label("Connected at \(url)", systemImage: "checkmark.circle.fill")
                     .font(.subheadline)
                     .foregroundStyle(.green)
                     .textSelection(.enabled)
-            } else if case .failed(let reason) = cloudflare.state {
+            } else if !compact, case .failed(let reason) = cloudflare.state {
                 Label(reason, systemImage: "exclamationmark.triangle.fill")
                     .font(.subheadline)
                     .foregroundStyle(.red)
             }
 
             // Once it is connected there is nothing left to set up, so the button goes in Settings.
-            if !(compact && cloudflare.state.activeURL != nil) {
+            if !compact {
                 Button("Set Up Tunnel") {
                     Task { await cloudflare.provisionAndConnect() }
                 }
@@ -258,64 +288,99 @@ struct ChecklistRow: View {
     }
 }
 
-/// A checklist for Settings: the lines that still need something, one each, and the finished lines
-/// folded under one "All set" or "n done" line that opens to their details.
+/// What a step in Settings says to do, in plain words.
+extension ChecklistTitles {
+    static func action(for kind: ChecklistItem.Kind) -> String {
+        switch kind {
+        case .signedIn: "Sign in to Tailscale"
+        case .online: "Connect this Mac to Tailscale"
+        case .name: "Give this Mac a name"
+        case .funnelAllowed: "Allow public addresses"
+        case .publicAddress: "Turn on the public address"
+        case .cloudflareAccount: "Create a Cloudflare account"
+        case .domain: "Add a domain to Cloudflare"
+        case .signIn: "Sign in to Cloudflare"
+        case .hostname: "Choose an address"
+        case .willCreate: "What iMCP creates"
+        }
+    }
+
+    static func symbol(for kind: ChecklistItem.Kind) -> String {
+        switch kind {
+        case .signedIn, .signIn: "person.crop.circle"
+        case .online: "wifi"
+        case .name, .hostname: "link"
+        case .funnelAllowed, .publicAddress: "network"
+        case .cloudflareAccount: "cloud"
+        case .domain: "globe"
+        case .willCreate: "info.circle"
+        }
+    }
+}
+
+/// A step in Settings that still needs something: an icon, what to do, one line of why, and a link if there is one.
+private struct StepRow: View {
+    let item: ChecklistItem
+    let openLink: (URL) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if item.status == .waiting {
+                    ProgressView().controlSize(.small).frame(width: 28, height: 28)
+                } else {
+                    SettingsIcon(symbol: ChecklistTitles.symbol(for: item.kind), color: tint)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(ChecklistTitles.action(for: item.kind))
+                if let detail = item.detail {
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if case .needsAction(let link) = item.status, let link {
+                    Button("Open") { openLink(link) }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var tint: Color {
+        if case .needsAction = item.status { return .orange }
+        return .gray
+    }
+}
+
+/// A checklist for Settings. Finished steps disappear: when every step is done it is one row that says so,
+/// and until then it shows only the steps that still need something.
 struct CompactChecklist<Inline: View>: View {
     let items: [ChecklistItem]
     let openLink: (ChecklistItem, URL) -> Void
-    /// What the header says when every line is done, with an optional line beneath it.
-    var doneTitle = "All set"
+    var doneTitle = "Ready"
     var doneSubtitle: String?
-    /// Controls that belong under a line that is not done yet.
+    var doneSymbol = "checkmark"
+    var doneColor: Color = .green
+    /// Controls that belong under a step that is not done yet.
     @ViewBuilder var inline: (ChecklistItem) -> Inline
-    @State private var showsDetails = false
 
     var body: some View {
-        let todo = items.filter { !$0.isDone }
-        let done = items.filter(\.isDone)
+        // "What iMCP creates" is an explanation, not a step; Settings says it once under the section.
+        let steps = items.filter { $0.kind != .willCreate }
+        let todo = steps.filter { !$0.isDone }
 
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(todo) { item in
-                ChecklistRow(
-                    title: ChecklistTitles.title(for: item.kind),
-                    item: item,
-                    openLink: { openLink(item, $0) },
-                    compact: true
-                )
-                inline(item)
+        if todo.isEmpty {
+            RowLabel(title: doneTitle, subtitle: doneSubtitle) {
+                SettingsIcon(symbol: doneSymbol, color: doneColor)
             }
-            if !done.isEmpty {
-                ExpandableRow(isExpanded: $showsDetails) {
-                    if todo.isEmpty {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .frame(width: 20, height: 20)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(doneTitle)
-                                if let doneSubtitle {
-                                    Text(doneSubtitle)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                            }
-                        }
-                    } else {
-                        Text("\(done.count) done").foregroundStyle(.secondary)
-                    }
-                } content: {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(done) { item in
-                            ChecklistRow(
-                                title: ChecklistTitles.title(for: item.kind),
-                                item: item,
-                                openLink: { openLink(item, $0) }
-                            )
-                        }
-                    }
-                }
+        } else {
+            ForEach(todo) { item in
+                StepRow(item: item, openLink: { openLink(item, $0) })
+                inline(item)
             }
         }
     }

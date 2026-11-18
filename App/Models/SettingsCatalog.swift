@@ -45,7 +45,7 @@ enum SettingsPane: Hashable, RawRepresentable, Sendable {
         case .clients: "Clients"
         case .mobile: "iPhone & iPad"
         case .remoteAccess: "Remote Access"
-        case .advanced: "Developer & Advanced"
+        case .advanced: "Advanced"
         case .service(let id): id
         }
     }
@@ -76,7 +76,7 @@ enum SettingsItem: CaseIterable, Sendable {
     // Remote Access
     case accessChoice, tailscaleChecklist, cloudflareChecklist, publicAddress, funnelPolicySnippet
     case tailscaleLogOut, cloudflareAccount
-    // Developer & Advanced
+    // Advanced
     case serverCommand, accessTokens, tailscaleDeviceName, tailscalePort, tailscaleAddresses, tailscaleAuthKey
     case mobileOverrides, mobileDetails, cachedData
 
