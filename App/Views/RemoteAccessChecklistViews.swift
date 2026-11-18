@@ -285,12 +285,9 @@ struct CompactChecklist<Inline: View>: View {
                 inline(item)
             }
             if !done.isEmpty {
-                // Not a DisclosureGroup: inside a grouped Form it pushes the details far to the right.
-                Button {
-                    withAnimation(.easeInOut(duration: 0.15)) { showsDetails.toggle() }
-                } label: {
-                    HStack(alignment: .center, spacing: 8) {
-                        if todo.isEmpty {
+                ExpandableRow(isExpanded: $showsDetails) {
+                    if todo.isEmpty {
+                        HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                                 .frame(width: 20, height: 20)
@@ -304,23 +301,11 @@ struct CompactChecklist<Inline: View>: View {
                                         .truncationMode(.middle)
                                 }
                             }
-                        } else {
-                            Text("\(done.count) done").foregroundStyle(.secondary)
                         }
-                        Spacer(minLength: 0)
-                        Text(showsDetails ? "Hide Details" : "Details")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .rotationEffect(.degrees(showsDetails ? 90 : 0))
+                    } else {
+                        Text("\(done.count) done").foregroundStyle(.secondary)
                     }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityValue(showsDetails ? "Expanded" : "Collapsed")
-                if showsDetails {
+                } content: {
                     VStack(alignment: .leading, spacing: 8) {
                         ForEach(done) { item in
                             ChecklistRow(
