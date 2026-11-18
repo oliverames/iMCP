@@ -87,7 +87,7 @@ struct CloudflareChecklistView: View {
                     .checklistButton(compact: compact)
                 }
             }
-            CloudflareTokenEntry(cloudflare: cloudflare)
+            CloudflareTokenEntry(cloudflare: cloudflare, compact: compact)
         }
         .padding(.leading, 28)
     }
