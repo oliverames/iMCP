@@ -224,7 +224,8 @@ struct MobileSettingsView: View {
 
     private func configurationSummary(for device: MobileDevice) -> String {
         guard let applied = appliedRevisions[device.id] else { return "Not confirmed" }
-        return applied == configurationRevision ? "Revision \(applied)" : "Revision \(applied), Mac is on \(configurationRevision)"
+        return applied == configurationRevision
+            ? "Revision \(applied)" : "Revision \(applied), Mac is on \(configurationRevision)"
     }
 
     private func pairingSheet(_ code: MobilePairingCode, expires: Date) -> some View {

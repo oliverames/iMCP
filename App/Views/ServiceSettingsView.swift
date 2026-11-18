@@ -327,7 +327,8 @@ private struct FilesFoldersSection: View {
                             : (folder.status.path ?? "Can't be opened")
                     ) {
                         SettingsIcon(
-                            symbol: folder.status.state == .needsReAdd ? "exclamationmark.triangle.fill" : "folder.fill",
+                            symbol: folder.status.state == .needsReAdd
+                                ? "exclamationmark.triangle.fill" : "folder.fill",
                             color: folder.status.state == .needsReAdd ? .orange : .blue
                         )
                     }

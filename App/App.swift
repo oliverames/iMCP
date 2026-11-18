@@ -68,7 +68,10 @@ struct App: SwiftUI.App {
             guard shouldCheck else { return }
             appDelegate.shouldCheckOnboarding = false
             #if DEBUG
-                if SettingsSnapshot.runIfRequested(serverController: serverController, updater: updaterController.updater) {
+                if SettingsSnapshot.runIfRequested(
+                    serverController: serverController,
+                    updater: updaterController.updater
+                ) {
                     return
                 }
                 if OnboardingSnapshot.runIfRequested(

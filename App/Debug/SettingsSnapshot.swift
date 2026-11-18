@@ -20,7 +20,8 @@
             guard let argument = arguments.first(where: { $0.hasPrefix("--snapshot-settings=") }) else { return false }
             let directory = URL(fileURLWithPath: String(argument.dropFirst("--snapshot-settings=".count)))
 
-            var tabs: [String] = SettingsTab.allCases.map(\.rawValue)
+            var tabs: [String] =
+                SettingsTab.allCases.map(\.rawValue)
                 + ["service-NotesService", "service-FilesService", "service-CalendarService", "service-HomeService"]
             if let tab = arguments.first(where: { $0.hasPrefix("--settings-tab=") }) {
                 tabs = [String(tab.dropFirst("--settings-tab=".count))]
@@ -44,8 +45,13 @@
                     for (sizeName, size) in sizes {
                         for tab in tabs {
                             await render(
-                                tab: tab, size: size, sizeName: sizeName, isDark: isDark,
-                                serverController: serverController, updater: updater, directory: directory
+                                tab: tab,
+                                size: size,
+                                sizeName: sizeName,
+                                isDark: isDark,
+                                serverController: serverController,
+                                updater: updater,
+                                directory: directory
                             )
                         }
                     }
@@ -56,8 +62,13 @@
         }
 
         private static func render(
-            tab: String, size: NSSize, sizeName: String, isDark: Bool,
-            serverController: ServerController, updater: SPUUpdater, directory: URL
+            tab: String,
+            size: NSSize,
+            sizeName: String,
+            isDark: Bool,
+            serverController: ServerController,
+            updater: SPUUpdater,
+            directory: URL
         ) async {
             let root: AnyView
             if tab.hasPrefix("service-") {
