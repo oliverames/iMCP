@@ -160,20 +160,12 @@ struct RemoteAccessSettingsView: View {
                         Task { await cloudflare.provisionAndConnect() }
                     }
                 }
-                Button {
-                    Task { await cloudflare.refreshZones() }
-                } label: {
-                    RowLabel(title: "Refresh domains") { SettingsIcon(symbol: "arrow.clockwise", color: .gray) }
+                HStack {
+                    Button("Refresh Domains") { Task { await cloudflare.refreshZones() } }
+                    Button("Log Out of Cloudflare…", role: .destructive) { isConfirmingCloudflareLogOut = true }
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                Button {
-                    isConfirmingCloudflareLogOut = true
-                } label: {
-                    RowLabel(title: "Log out of Cloudflare…") {
-                        SettingsIcon(symbol: "rectangle.portrait.and.arrow.right", color: .red)
-                    }
-                }
-                .buttonStyle(.plain)
+                .buttonStyle(.bordered)
             }
         } header: {
             Text("Cloudflare Tunnel")
