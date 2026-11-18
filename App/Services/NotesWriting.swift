@@ -22,6 +22,7 @@ enum NotesWriteError: LocalizedError, CustomStringConvertible, Equatable {
     case invalid(String)
     case writesDisabled
     case automationDenied
+    case stale
     case scriptFailed(String)
 
     var description: String { localizedDescription }
@@ -36,6 +37,9 @@ enum NotesWriteError: LocalizedError, CustomStringConvertible, Equatable {
         case .automationDenied:
             return
                 "Not authorized to send Apple events to Notes. Enable iMCP in System Settings > Privacy & Security > Automation."
+        case .stale:
+            return
+                "The note changed after it was read, so nothing was written. Read the note again, and make the change to its current text."
         case .scriptFailed(let message):
             return "Notes could not complete the request: \(message)"
         }

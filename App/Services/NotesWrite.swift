@@ -16,8 +16,13 @@ extension NotesService {
                 isEnabled: { NotesWriteTools.isEnabledInSettings },
                 runner: AppleNotesScriptRunner()
             )
+            + NotesOrganizeTools.tools(
+                isEnabled: { NotesWriteTools.isEnabledInSettings },
+                runner: AppleNotesScriptRunner()
+            )
+            + NotesPrivateTools.tools
     }
 
-    /// The tools that create notes are new, so they start off until the person turns writes on.
+    /// The tools that change notes are new, so they start off until the person turns writes on.
     var writesEnabledByDefault: Bool { false }
 }

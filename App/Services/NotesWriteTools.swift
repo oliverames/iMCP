@@ -21,6 +21,10 @@ struct AppleNotesScriptRunner: NotesScriptRunning {
             if error.number == Int(errAEEventNotPermitted) {
                 throw NotesWriteError.automationDenied
             }
+            // The script raises 4007 when a note changed after it was read.
+            if error.number == 4007 {
+                throw NotesWriteError.stale
+            }
             throw NotesWriteError.scriptFailed(error.message)
         }
     }
@@ -32,10 +36,23 @@ struct AppleNotesScriptRunner: NotesScriptRunning {
 /// iMCP offers them only while the person turns on "Allow writes" in Notes' settings
 /// (see `ServiceWrites`), which is off until then.
 enum NotesWriteTools {
+    /// The Notes-only setting that "Allow writes" replaced. `ServiceWrites.migrateLegacySettings` moves it.
+    static let settingKey = ServiceWrites.legacyNotesKey
+
     static let toolNames: Set<String> = ["notes_create", "notes_create_folder"]
 
     static var isEnabledInSettings: Bool {
-        ServiceWrites.isEnabled(serviceID: ServiceWrites.notesServiceID, defaultValue: false)
+        writesEnabled(in: .standard)
+    }
+
+    /// Whether "Allow writes" is on for Notes in `defaults`.
+    static func writesEnabled(in defaults: UserDefaults) -> Bool {
+        ServiceWrites.isEnabled(serviceID: ServiceWrites.notesServiceID, defaultValue: false, defaults: defaults)
+    }
+
+    /// Turns "Allow writes" for Notes on or off in `defaults`. Used by tests and the DEBUG self-test.
+    static func setWritesEnabled(_ isEnabled: Bool, in defaults: UserDefaults) {
+        ServiceWrites.setEnabled(isEnabled, serviceID: ServiceWrites.notesServiceID, defaults: defaults)
     }
 
     /// Throws unless `isEnabled`, so that a tool changes nothing while the setting is off.
