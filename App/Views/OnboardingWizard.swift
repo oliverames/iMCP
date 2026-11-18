@@ -4,8 +4,7 @@ import SwiftUI
 
 /// Guided setup for services, remote tunnels, iPhone pairing, approvals, and connecting AI apps.
 ///
-/// Each step is a grouped `Form`. The steps are in a segmented control in the title bar,
-/// and Back and Continue are at the bottom. Everything here is also in Settings;
+/// Each step is a grouped `Form`. The title bar shows the step, and Back and Continue are at the bottom. Everything here is also in Settings;
 /// the assistant only puts the first-run choices in order.
 struct OnboardingWizardView: View {
     @ObservedObject var serverController: ServerController
@@ -42,8 +41,6 @@ struct OnboardingWizardView: View {
         }
     }
 
-    private var isLastStep: Bool { step == Step.allCases.last }
-
     var body: some View {
         Group {
             switch step {
@@ -62,43 +59,82 @@ struct OnboardingWizardView: View {
         .formStyle(.grouped)
         .navigationTitle("Set Up iMCP")
         .navigationSubtitle("Step \(step.rawValue + 1) of \(Step.allCases.count): \(step.title)")
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Step", selection: $step) {
-                    ForEach(Step.allCases) { step in
-                        Text(step.title).tag(step)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityLabel("Setup step")
-            }
-        }
+        .modifier(WizardScrollEdge())
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
-                Button("Close", action: onFinish)
-                    .keyboardShortcut(.cancelAction)
-
-                Spacer()
-
-                if let previous = Step(rawValue: step.rawValue - 1) {
-                    Button("Back") { step = previous }
-                }
-
-                if let next = Step(rawValue: step.rawValue + 1) {
-                    Button("Continue") { step = next }
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
-                } else {
-                    Button("Done", action: onFinish)
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
-                }
-            }
-            .padding()
-            .background(.bar)
+            WizardFooter(step: $step, onFinish: onFinish)
         }
         .frame(minWidth: 520, idealWidth: 560, minHeight: 440, idealHeight: 600)
+    }
+}
+
+// MARK: - Footer and glass
+
+/// Back, Continue, and Close. The buttons are glass on macOS 26 and later,
+/// where the system keeps them legible over the scrolling form, and bordered buttons on a bar before that.
+private struct WizardFooter: View {
+    @Binding var step: OnboardingWizardView.Step
+    let onFinish: () -> Void
+
+    var body: some View {
+        if #available(macOS 26, *) {
+            GlassEffectContainer { buttons.padding() }
+        } else {
+            buttons.padding().background(.bar)
+        }
+    }
+
+    private var buttons: some View {
+        HStack {
+            Button("Close", action: onFinish)
+                .keyboardShortcut(.cancelAction)
+                .modifier(WizardButtonStyle(isProminent: false))
+
+            Spacer()
+
+            if let previous = OnboardingWizardView.Step(rawValue: step.rawValue - 1) {
+                Button("Back") { step = previous }
+                    .modifier(WizardButtonStyle(isProminent: false))
+            }
+
+            if let next = OnboardingWizardView.Step(rawValue: step.rawValue + 1) {
+                Button("Continue") { step = next }
+                    .keyboardShortcut(.defaultAction)
+                    .modifier(WizardButtonStyle(isProminent: true))
+            } else {
+                Button("Done", action: onFinish)
+                    .keyboardShortcut(.defaultAction)
+                    .modifier(WizardButtonStyle(isProminent: true))
+            }
+        }
+    }
+}
+
+private struct WizardButtonStyle: ViewModifier {
+    let isProminent: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            if isProminent {
+                content.buttonStyle(.glassProminent)
+            } else {
+                content.buttonStyle(.glass)
+            }
+        } else if isProminent {
+            content.buttonStyle(.borderedProminent)
+        } else {
+            content.buttonStyle(.bordered)
+        }
+    }
+}
+
+/// Fades the form out softly under the footer, so the glass buttons stay legible.
+private struct WizardScrollEdge: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.scrollEdgeEffectStyle(.soft, for: .bottom)
+        } else {
+            content
+        }
     }
 }
 

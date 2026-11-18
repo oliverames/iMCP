@@ -68,19 +68,28 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         if let hostingController {
             hostingController.rootView = rootView
         } else {
-            let controller = NSHostingController(rootView: rootView)
-            self.hostingController = controller
-
-            let window = NSWindow(contentViewController: controller)
-            window.styleMask = [.titled, .closable, .resizable]
-            window.isReleasedWhenClosed = false
+            let window = Self.makeWindow(rootView: rootView)
             window.delegate = self
+            self.hostingController = window.contentViewController as? NSHostingController<AnyView>
             window.center()
             self.window = window
         }
 
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// A titled, resizable window around `rootView`, at the size the assistant opens with.
+    static func makeWindow(rootView: AnyView) -> NSWindow {
+        let controller = NSHostingController(rootView: rootView)
+        // The form is long, so keep the window from growing to fit all of it.
+        controller.sizingOptions = [.minSize]
+        let window = NSWindow(contentViewController: controller)
+        window.styleMask = [.titled, .closable, .resizable]
+        window.isReleasedWhenClosed = false
+        window.title = "Set Up iMCP"
+        window.setContentSize(NSSize(width: 560, height: 600))
+        return window
     }
 
     func windowWillClose(_ notification: Notification) {
