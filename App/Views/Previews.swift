@@ -21,11 +21,11 @@ import SwiftUI
 }
 
 #Preview("Settings") {
-    SettingsView(serverController: ServerController(), isMenuBarExtraInserted: true)
+    SettingsView(serverController: ServerController(), isMenuBarExtraInserted: true, updater: nil)
 }
 
 #Preview("General") {
-    GeneralSettingsView(serverController: ServerController(), isMenuBarExtraInserted: true)
+    GeneralSettingsView(serverController: ServerController(), isMenuBarExtraInserted: true, updater: nil)
         .frame(width: 500, height: 300)
 }
 

@@ -68,6 +68,9 @@ struct App: SwiftUI.App {
             guard shouldCheck else { return }
             appDelegate.shouldCheckOnboarding = false
             #if DEBUG
+                if SettingsSnapshot.runIfRequested(serverController: serverController, updater: updaterController.updater) {
+                    return
+                }
                 if OnboardingSnapshot.runIfRequested(
                     serverController: serverController,
                     isEnabled: $isEnabled,
@@ -100,9 +103,11 @@ struct App: SwiftUI.App {
         Settings {
             SettingsView(
                 serverController: serverController,
-                isMenuBarExtraInserted: appDelegate.isMenuBarExtraInserted
+                isMenuBarExtraInserted: appDelegate.isMenuBarExtraInserted,
+                updater: updaterController.updater
             )
         }
+        .windowResizability(.contentMinSize)
 
         .commands {
             CommandGroup(replacing: .appTermination) {
