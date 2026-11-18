@@ -62,11 +62,31 @@
                     )
                     guard let window = controller.window else { continue }
                     window.appearance = appearance
+                    // A clear window background does not draw into a snapshot.
+                    window.backgroundColor = .windowBackgroundColor
                     try? await Task.sleep(for: .seconds(1.5))
                     controller.fit(animate: false)
                     try? await Task.sleep(for: .seconds(0.5))
-                    if let frame = window.contentView?.superview {
-                        write(frame, to: directory.appending(path: "\(index + 1)-\(step.rawValue)-\(name).png"))
+                    window.contentView?.layoutSubtreeIfNeeded()
+                    window.displayIfNeeded()
+                    if let content = window.contentView {
+                        write(content, to: directory.appending(path: "\(index + 1)-\(step.rawValue)-\(name).png"))
+                    }
+                    // A second route, for comparison: SwiftUI's own renderer.
+                    let renderer = ImageRenderer(
+                        content: OnboardingView(model: model)
+                            .environment(\.colorScheme, isDark ? .dark : .light)
+                            .environment(\.dynamicTypeSize, isLarge ? .accessibility5 : .large)
+                            .frame(width: OnboardingView.width)
+                            .background(Color(nsColor: .windowBackgroundColor))
+                    )
+                    renderer.scale = 2
+                    if let image = renderer.nsImage, let tiff = image.tiffRepresentation,
+                        let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+                    {
+                        try? png.write(
+                            to: directory.appending(path: "\(index + 1)-\(step.rawValue)-\(name)-render.png")
+                        )
                     }
                     window.orderOut(nil)
                 }
