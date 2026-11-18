@@ -122,175 +122,175 @@ enum DevBootstrap {
     // MARK: - Mac Bootstrap
 
     #if os(macOS)
-    /// Seeds Cloudflare `cert.pem`, default Cloudflare hostname, mobile Cloudflare URL, and default
-    /// approval mode on Oliver's Mac dev builds if not already configured.
-    static func seedMacDefaultsAndCertIfNeeded(
-        defaults: UserDefaults = .standard,
-        containerCertURL: URL
-    ) {
-        guard isConfigured else { return }
+        /// Seeds Cloudflare `cert.pem`, default Cloudflare hostname, mobile Cloudflare URL, and default
+        /// approval mode on Oliver's Mac dev builds if not already configured.
+        static func seedMacDefaultsAndCertIfNeeded(
+            defaults: UserDefaults = .standard,
+            containerCertURL: URL
+        ) {
+            guard isConfigured else { return }
 
-        if let certData = cloudflareCertData,
-            !FileManager.default.fileExists(atPath: containerCertURL.path)
-        {
-            let dir = containerCertURL.deletingLastPathComponent()
-            try? FileManager.default.createDirectory(
-                at: dir,
-                withIntermediateDirectories: true,
-                attributes: [.posixPermissions: 0o700]
-            )
-            try? certData.write(to: containerCertURL, options: .atomic)
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: containerCertURL.path)
-        }
+            if let certData = cloudflareCertData,
+                !FileManager.default.fileExists(atPath: containerCertURL.path)
+            {
+                let dir = containerCertURL.deletingLastPathComponent()
+                try? FileManager.default.createDirectory(
+                    at: dir,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700]
+                )
+                try? certData.write(to: containerCertURL, options: .atomic)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: containerCertURL.path)
+            }
 
-        if !defaults.bool(forKey: macCloudflareSeededKey) {
-            if let host = cloudflareHostname,
-                (defaults.string(forKey: "cloudflareTunnelHostname") ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            {
-                defaults.set(host, forKey: "cloudflareTunnelHostname")
+            if !defaults.bool(forKey: macCloudflareSeededKey) {
+                if let host = cloudflareHostname,
+                    (defaults.string(forKey: "cloudflareTunnelHostname") ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                {
+                    defaults.set(host, forKey: "cloudflareTunnelHostname")
+                }
+                if let tunnelID = cloudflareTunnelID,
+                    (defaults.string(forKey: "cloudflareTunnelID") ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                {
+                    defaults.set(tunnelID, forKey: "cloudflareTunnelID")
+                }
+                if let tunnelName = cloudflareTunnelName,
+                    (defaults.string(forKey: "cloudflareTunnelName") ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                {
+                    defaults.set(tunnelName, forKey: "cloudflareTunnelName")
+                }
+                if defaults.object(forKey: "cloudflareTunnelEnabled") == nil, cloudflareHostname != nil {
+                    defaults.set(true, forKey: "cloudflareTunnelEnabled")
+                }
+                if defaults.object(forKey: "remoteAccessEnabled") == nil {
+                    defaults.set(true, forKey: "remoteAccessEnabled")
+                }
+                if defaults.object(forKey: "remoteAccessFunnelEnabled") == nil {
+                    defaults.set(true, forKey: "remoteAccessFunnelEnabled")
+                }
+                for serviceKey in [
+                    "alarmsEnabled",
+                    "calendarEnabled",
+                    "captureEnabled",
+                    "contactsEnabled",
+                    "filesEnabled",
+                    "healthEnabled",
+                    "locationEnabled",
+                    "mailEnabled",
+                    "mapsEnabled",
+                    "messagesEnabled",
+                    "musicEnabled",
+                    "notesEnabled",
+                    "phoneEnabled",
+                    "remindersEnabled",
+                    "shortcutsEnabled",
+                    "utilitiesEnabled",
+                    "voiceMemosEnabled",
+                    "voicemailEnabled",
+                    "weatherEnabled",
+                    "writesEnabled.FilesService",
+                    "writesEnabled.MessageService",
+                    "writesEnabled.NotesService",
+                ] where defaults.object(forKey: serviceKey) == nil {
+                    defaults.set(true, forKey: serviceKey)
+                }
+                if let cfMobile = cloudflareMobileURL,
+                    (defaults.string(forKey: "mobileCloudflareURL") ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                {
+                    defaults.set(cfMobile, forKey: "mobileCloudflareURL")
+                }
+                if let funnelMobile = funnelMobileURL,
+                    (defaults.string(forKey: "mobileFunnelURL") ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                {
+                    defaults.set(funnelMobile, forKey: "mobileFunnelURL")
+                }
+                if let tsHost = tailnetHost,
+                    (defaults.string(forKey: "mobileTailnetHost") ?? "")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .isEmpty
+                {
+                    defaults.set(tsHost, forKey: "mobileTailnetHost")
+                }
+                defaults.set(true, forKey: macCloudflareSeededKey)
             }
-            if let tunnelID = cloudflareTunnelID,
-                (defaults.string(forKey: "cloudflareTunnelID") ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            {
-                defaults.set(tunnelID, forKey: "cloudflareTunnelID")
-            }
-            if let tunnelName = cloudflareTunnelName,
-                (defaults.string(forKey: "cloudflareTunnelName") ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            {
-                defaults.set(tunnelName, forKey: "cloudflareTunnelName")
-            }
-            if defaults.object(forKey: "cloudflareTunnelEnabled") == nil, cloudflareHostname != nil {
-                defaults.set(true, forKey: "cloudflareTunnelEnabled")
-            }
+
             if defaults.object(forKey: "remoteAccessEnabled") == nil {
                 defaults.set(true, forKey: "remoteAccessEnabled")
-            }
-            if defaults.object(forKey: "remoteAccessFunnelEnabled") == nil {
                 defaults.set(true, forKey: "remoteAccessFunnelEnabled")
             }
-            for serviceKey in [
-                "alarmsEnabled",
-                "calendarEnabled",
-                "captureEnabled",
-                "contactsEnabled",
-                "filesEnabled",
-                "healthEnabled",
-                "locationEnabled",
-                "mailEnabled",
-                "mapsEnabled",
-                "messagesEnabled",
-                "musicEnabled",
-                "notesEnabled",
-                "phoneEnabled",
-                "remindersEnabled",
-                "shortcutsEnabled",
-                "utilitiesEnabled",
-                "voiceMemosEnabled",
-                "voicemailEnabled",
-                "weatherEnabled",
-                "writesEnabled.FilesService",
-                "writesEnabled.MessageService",
-                "writesEnabled.NotesService",
-            ] where defaults.object(forKey: serviceKey) == nil {
-                defaults.set(true, forKey: serviceKey)
+            if defaults.object(forKey: "notesEnabled") == nil {
+                for serviceKey in [
+                    "alarmsEnabled",
+                    "calendarEnabled",
+                    "captureEnabled",
+                    "contactsEnabled",
+                    "filesEnabled",
+                    "healthEnabled",
+                    "locationEnabled",
+                    "mailEnabled",
+                    "mapsEnabled",
+                    "messagesEnabled",
+                    "musicEnabled",
+                    "notesEnabled",
+                    "phoneEnabled",
+                    "remindersEnabled",
+                    "shortcutsEnabled",
+                    "utilitiesEnabled",
+                    "voiceMemosEnabled",
+                    "voicemailEnabled",
+                    "weatherEnabled",
+                    "writesEnabled.FilesService",
+                    "writesEnabled.MessageService",
+                    "writesEnabled.NotesService",
+                ] where defaults.object(forKey: serviceKey) == nil {
+                    defaults.set(true, forKey: serviceKey)
+                }
             }
-            if let cfMobile = cloudflareMobileURL,
-                (defaults.string(forKey: "mobileCloudflareURL") ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            {
-                defaults.set(cfMobile, forKey: "mobileCloudflareURL")
-            }
-            if let funnelMobile = funnelMobileURL,
-                (defaults.string(forKey: "mobileFunnelURL") ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            {
-                defaults.set(funnelMobile, forKey: "mobileFunnelURL")
-            }
-            if let tsHost = tailnetHost,
-                (defaults.string(forKey: "mobileTailnetHost") ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .isEmpty
-            {
-                defaults.set(tsHost, forKey: "mobileTailnetHost")
-            }
-            defaults.set(true, forKey: macCloudflareSeededKey)
-        }
 
-        if defaults.object(forKey: "remoteAccessEnabled") == nil {
-            defaults.set(true, forKey: "remoteAccessEnabled")
-            defaults.set(true, forKey: "remoteAccessFunnelEnabled")
-        }
-        if defaults.object(forKey: "notesEnabled") == nil {
-            for serviceKey in [
-                "alarmsEnabled",
-                "calendarEnabled",
-                "captureEnabled",
-                "contactsEnabled",
-                "filesEnabled",
-                "healthEnabled",
-                "locationEnabled",
-                "mailEnabled",
-                "mapsEnabled",
-                "messagesEnabled",
-                "musicEnabled",
-                "notesEnabled",
-                "phoneEnabled",
-                "remindersEnabled",
-                "shortcutsEnabled",
-                "utilitiesEnabled",
-                "voiceMemosEnabled",
-                "voicemailEnabled",
-                "weatherEnabled",
-                "writesEnabled.FilesService",
-                "writesEnabled.MessageService",
-                "writesEnabled.NotesService",
-            ] where defaults.object(forKey: serviceKey) == nil {
-                defaults.set(true, forKey: serviceKey)
+            if !defaults.bool(forKey: macApprovalModeSeededKey) {
+                if defaults.string(forKey: ApprovalMode.defaultsKey) == nil {
+                    ApprovalMode.setCurrent(.agentManaged, defaults: defaults)
+                }
+                defaults.set(true, forKey: macApprovalModeSeededKey)
             }
         }
 
-        if !defaults.bool(forKey: macApprovalModeSeededKey) {
-            if defaults.string(forKey: ApprovalMode.defaultsKey) == nil {
-                ApprovalMode.setCurrent(.agentManaged, defaults: defaults)
+        static func isMacDeviceUnpaired(_ id: String, defaults: UserDefaults = .standard) -> Bool {
+            let unpaired = defaults.stringArray(forKey: macUnpairedDeviceIDsKey) ?? []
+            return unpaired.contains(id)
+        }
+
+        static func markMacDeviceUnpaired(_ id: String, defaults: UserDefaults = .standard) {
+            var unpaired = defaults.stringArray(forKey: macUnpairedDeviceIDsKey) ?? []
+            if !unpaired.contains(id) {
+                unpaired.append(id)
+                defaults.set(unpaired, forKey: macUnpairedDeviceIDsKey)
             }
-            defaults.set(true, forKey: macApprovalModeSeededKey)
         }
-    }
 
-    static func isMacDeviceUnpaired(_ id: String, defaults: UserDefaults = .standard) -> Bool {
-        let unpaired = defaults.stringArray(forKey: macUnpairedDeviceIDsKey) ?? []
-        return unpaired.contains(id)
-    }
-
-    static func markMacDeviceUnpaired(_ id: String, defaults: UserDefaults = .standard) {
-        var unpaired = defaults.stringArray(forKey: macUnpairedDeviceIDsKey) ?? []
-        if !unpaired.contains(id) {
-            unpaired.append(id)
-            defaults.set(unpaired, forKey: macUnpairedDeviceIDsKey)
+        /// Seeds the pre-paired `(deviceID, deviceName, key)` into the Mac's pairing store if absent and not unpaired.
+        static func seedMacPairingIfNeeded(
+            defaults: UserDefaults = .standard,
+            existingDeviceIDs: () -> [String],
+            existingKey: (String) -> SymmetricKey?,
+            save: (String, String, SymmetricKey) throws -> Void
+        ) {
+            guard isConfigured, let key = deviceKey else { return }
+            guard !isMacDeviceUnpaired(deviceID, defaults: defaults) else { return }
+            if existingDeviceIDs().contains(deviceID), existingKey(deviceID) != nil {
+                return
+            }
+            try? save(deviceID, deviceName, key)
         }
-    }
-
-    /// Seeds the pre-paired `(deviceID, deviceName, key)` into the Mac's pairing store if absent and not unpaired.
-    static func seedMacPairingIfNeeded(
-        defaults: UserDefaults = .standard,
-        existingDeviceIDs: () -> [String],
-        existingKey: (String) -> SymmetricKey?,
-        save: (String, String, SymmetricKey) throws -> Void
-    ) {
-        guard isConfigured, let key = deviceKey else { return }
-        guard !isMacDeviceUnpaired(deviceID, defaults: defaults) else { return }
-        if existingDeviceIDs().contains(deviceID), existingKey(deviceID) != nil {
-            return
-        }
-        try? save(deviceID, deviceName, key)
-    }
     #endif
 }
