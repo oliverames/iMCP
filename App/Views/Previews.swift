@@ -43,9 +43,8 @@ import SwiftUI
 }
 
 #Preview("Set Up iMCP") {
-    OnboardingWizardView(
-        serverController: ServerController(),
-        isEnabled: .constant(false),
-        onFinish: {}
+    let controller = ServerController()
+    OnboardingView(
+        model: OnboardingModel(mode: .firstRun, serverController: controller, isEnabled: .constant(false))
     )
 }

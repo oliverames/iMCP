@@ -75,10 +75,11 @@ struct ContentView: View {
         }
         .frame(width: MenuMetrics.width)
         .padding(.vertical, MenuMetrics.edge)
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { height in
-            menuPanel.contentHeight = height
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { size in
+            menuPanel.contentWidth = size.width
+            menuPanel.contentHeight = size.height
             menuPanel.resizeToFitContent()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -201,6 +202,7 @@ enum MenuMetrics {
 /// Resizes the `MenuBarExtra` panel that shows ``ContentView`` to fit its content.
 @MainActor
 final class MenuPanelController {
+    var contentWidth: CGFloat = 0
     var contentHeight: CGFloat = 0
 
     private weak var window: NSWindow?
@@ -229,18 +231,26 @@ final class MenuPanelController {
         resizeToFitContent()
     }
 
-    // MenuBarExtra's window keeps a stale taller frame when its content shrinks,
-    // leaving the content vertically centered in an oversized panel. Resize it to fit.
+    // MenuBarExtra's window keeps whatever size the system first gave it. When the content is narrower
+    // or shorter, the content floats in an oversized panel, with wide margins on both sides.
+    // Resize the window to the content, keeping it centered under the menu bar item and on screen.
     func resizeToFitContent() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.window, self.contentHeight > 0 else { return }
+            guard let self, let window = self.window, self.contentHeight > 0, self.contentWidth > 0 else {
+                return
+            }
             let frame = window.frame
-            guard abs(frame.height - self.contentHeight) > 0.5 else { return }
+            guard abs(frame.height - self.contentHeight) > 0.5 || abs(frame.width - self.contentWidth) > 0.5
+            else { return }
+            var x = frame.midX - self.contentWidth / 2
+            if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
+                x = min(max(x, visible.minX + 4), visible.maxX - self.contentWidth - 4)
+            }
             window.setFrame(
                 NSRect(
-                    x: frame.minX,
+                    x: x,
                     y: frame.maxY - self.contentHeight,
-                    width: frame.width,
+                    width: self.contentWidth,
                     height: self.contentHeight
                 ),
                 display: true

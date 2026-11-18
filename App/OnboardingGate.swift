@@ -1,11 +1,12 @@
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 
-/// Whether the setup wizard should open on its own at launch.
+/// Whether the setup window should open on its own at launch.
 ///
 /// It opens automatically only at the first launch.
-/// Once a person has seen it, by finishing, by choosing Finish Later,
+/// Once a person has seen it, by finishing, by choosing Not Now,
 /// or by closing its window,
 /// it never opens on its own again. "Set Up iMCP…" in the menu or Settings still opens it.
 enum OnboardingGate {
@@ -21,80 +22,124 @@ enum OnboardingGate {
     }
 }
 
-/// Shows the setup wizard's window, and brings it to the front if it is already open.
+/// Shows the setup window, and brings it to the front if it is already open.
+///
+/// The window is `OnboardingView.width` points wide and as tall as the current step,
+/// no taller than its display, as in Ping Warden.
 @MainActor
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let shared = OnboardingWindowController()
 
-    private var hostingController: NSHostingController<AnyView>?
-    private var onSeen: (() -> Void)?
+    private var model: OnboardingModel?
+    private var measure: ((NSSize) -> NSSize)?
+    private var observations: Set<AnyCancellable> = []
 
     convenience init() {
         self.init(window: nil)
     }
 
-    /// Opens the setup wizard for `serverController` and `isEnabled`.
+    /// Opens the setup window for `serverController` and `isEnabled`.
+    /// The first time it is the introduction; after that it resumes at the first step that is not done.
     func present(serverController: ServerController, isEnabled: Binding<Bool>) {
-        let markSeen = {
-            UserDefaults.standard.set(true, forKey: OnboardingGate.seenDefaultsKey)
+        let hasSeen = UserDefaults.standard.bool(forKey: OnboardingGate.seenDefaultsKey)
+        let mode: OnboardingMode = hasSeen ? .finishSetup : .firstRun
+
+        if let window, let model {
+            model.reset(mode: mode)
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
         }
-        var initialStep = OnboardingWizardView.Step.services
-        #if DEBUG
-            // `--onboarding-step=N` opens step N (0 to 4), for screenshots.
-            if let argument = ProcessInfo.processInfo.arguments.first(where: { $0.hasPrefix("--onboarding-step=") }),
-                let value = Int(argument.dropFirst("--onboarding-step=".count)),
-                let step = OnboardingWizardView.Step(rawValue: value)
-            {
-                initialStep = step
-            }
-        #endif
-        let view = OnboardingWizardView(
-            serverController: serverController,
-            isEnabled: isEnabled,
-            initialStep: initialStep,
-            onFinish: { [weak self] in
-                markSeen()
-                self?.close()
+
+        let model = OnboardingModel(mode: mode, serverController: serverController, isEnabled: isEnabled)
+        model.actions = OnboardingModel.Actions(
+            close: { [weak self] in self?.close() },
+            openSettings: {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
         )
-        show(view, onSeen: markSeen)
+        show(model)
     }
 
-    /// Shows `content` in the window, and calls `onSeen` once when the window closes.
-    func show(_ content: some View, onSeen: @escaping () -> Void) {
-        self.onSeen = onSeen
-        let rootView = AnyView(content)
-
-        if let hostingController {
-            hostingController.rootView = rootView
-        } else {
-            let window = Self.makeWindow(rootView: rootView)
-            window.delegate = self
-            self.hostingController = window.contentViewController as? NSHostingController<AnyView>
-            window.center()
-            self.window = window
+    func show(_ model: OnboardingModel, initialStep: OnboardingStep? = nil, extra: ((AnyView) -> AnyView)? = nil) {
+        self.model = model
+        if let initialStep { model.jump(to: initialStep) }
+        let window = Self.makeWindow(model: model, extra: extra)
+        window.delegate = self
+        self.window = window
+        self.measure = { [weak self] proposal in
+            (self?.window?.contentViewController as? NSHostingController<AnyView>)?.sizeThatFits(in: proposal)
+                ?? proposal
         }
+        fit(animate: false)
+        window.center()
+        // Steps and their content change through the model and the server. Fit after the change lands.
+        observations = []
+        model.objectWillChange
+            .merge(with: model.serverController.objectWillChange)
+            .sink { [weak self] _ in Task { @MainActor in self?.fit(animate: true) } }
+            .store(in: &observations)
 
         NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        window.makeKeyAndOrderFront(nil)
     }
 
-    /// A titled, resizable window around `rootView`, at the size the assistant opens with.
-    static func makeWindow(rootView: AnyView) -> NSWindow {
-        let controller = NSHostingController(rootView: rootView)
-        // The form is long, so keep the window from growing to fit all of it.
-        controller.sizingOptions = [.minSize]
-        let window = NSWindow(contentViewController: controller)
-        window.styleMask = [.titled, .closable, .resizable]
-        window.isReleasedWhenClosed = false
+    /// A titled window with a transparent title bar around the setup view.
+    static func makeWindow(model: OnboardingModel, extra: ((AnyView) -> AnyView)? = nil) -> NSWindow {
+        var root = AnyView(OnboardingView(model: model))
+        if let extra { root = extra(root) }
+        let controller = NSHostingController(rootView: root)
+        // The window owns its size and fits it to each step. Following the controller's
+        // preferred size can loop AppKit's layout on a display shorter than a step.
+        controller.sizingOptions = []
+        let initialSize = NSSize(width: OnboardingView.width, height: OnboardingView.minimumContentHeight)
+        controller.view.frame = NSRect(origin: .zero, size: initialSize)
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: initialSize),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = controller
         window.title = "Set Up iMCP"
-        window.contentMinSize = NSSize(width: 720, height: 480)
-        window.setContentSize(NSSize(width: 880, height: 560))
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.backgroundColor = .clear
+        window.isReleasedWhenClosed = false
         return window
     }
 
+    /// Size the window to its current step, no taller than the visible part of its display,
+    /// keeping the top edge in place. A step that doesn't fit scrolls inside the window.
+    func fit(animate: Bool) {
+        guard let window, let measure, let screen = window.screen ?? NSScreen.main else { return }
+        let visible = screen.visibleFrame
+        let available = window.contentRect(forFrameRect: visible).height
+        let fitting = measure(NSSize(width: OnboardingView.width, height: available))
+        let size = NSSize(width: OnboardingView.width, height: min(ceil(fitting.height), available))
+        var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+        guard frame.size != window.frame.size else { return }
+        frame.origin.x = window.frame.minX
+        frame.origin.y = window.frame.maxY - frame.height
+        frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+        let animates = animate && window.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        window.setFrame(frame, display: true, animate: animates)
+    }
+
+    func windowDidChangeScreen(_ notification: Notification) {
+        fit(animate: false)
+    }
+
     func windowWillClose(_ notification: Notification) {
-        onSeen?()
-        onSeen = nil
+        // Closing is Not Now: the introduction does not open on its own again.
+        UserDefaults.standard.set(true, forKey: OnboardingGate.seenDefaultsKey)
+        model?.windowWillClose()
+        model = nil
+        measure = nil
+        observations = []
+        window = nil
     }
 }

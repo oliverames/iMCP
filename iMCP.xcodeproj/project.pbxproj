@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		B2C4D6E80000000000000012 /* ../../Shared/Mobile/MobileConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C4D6E80000000000000011 /* ../../Shared/Mobile/MobileConfiguration.swift */; };
 		B2C4D6E80000000000000014 /* MobileConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2C4D6E80000000000000013 /* MobileConfigurationTests.swift */; };
+		B15000000000000000000022 /* ../../App/Models/RemoteAccessChecklist.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */; };
+		B15000000000000000000024 /* RemoteAccessChecklistTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000023 /* RemoteAccessChecklistTests.swift */; };
+		B15000000000000000000012 /* ../../App/Models/OnboardingFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */; };
+		B15000000000000000000014 /* OnboardingFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000013 /* OnboardingFlowTests.swift */; };
 		B15000000000000000000002 /* ../../App/Models/MenuStructure.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */; };
 		B15000000000000000000004 /* MenuStructureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B15000000000000000000003 /* MenuStructureTests.swift */; };
 		0C442369FEFC71CA64EFDDCD /* MobileCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E70399C0AD0A7EF1C0755801 /* MobileCacheTests.swift */; };
@@ -202,6 +206,10 @@
 /* Begin PBXFileReference section */
 		B2C4D6E80000000000000011 /* ../../Shared/Mobile/MobileConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../Shared/Mobile/MobileConfiguration.swift; sourceTree = "<group>"; };
 		B2C4D6E80000000000000013 /* MobileConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileConfigurationTests.swift; sourceTree = "<group>"; };
+		B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/RemoteAccessChecklist.swift; sourceTree = "<group>"; };
+		B15000000000000000000023 /* RemoteAccessChecklistTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteAccessChecklistTests.swift; sourceTree = "<group>"; };
+		B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/OnboardingFlow.swift; sourceTree = "<group>"; };
+		B15000000000000000000013 /* OnboardingFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowTests.swift; sourceTree = "<group>"; };
 		B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Models/MenuStructure.swift; sourceTree = "<group>"; };
 		B15000000000000000000003 /* MenuStructureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuStructureTests.swift; sourceTree = "<group>"; };
 		485454500000000000000014 /* ../../App/Controllers/FunnelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Controllers/FunnelAccess.swift; sourceTree = "<group>"; };
@@ -567,6 +575,10 @@
 				B13800000000000000000010 /* ApprovalModeTests.swift */,
 				B15000000000000000000001 /* ../../App/Models/MenuStructure.swift */,
 				B15000000000000000000003 /* MenuStructureTests.swift */,
+				B15000000000000000000011 /* ../../App/Models/OnboardingFlow.swift */,
+				B15000000000000000000013 /* OnboardingFlowTests.swift */,
+				B15000000000000000000021 /* ../../App/Models/RemoteAccessChecklist.swift */,
+				B15000000000000000000023 /* RemoteAccessChecklistTests.swift */,
 				B13800000000000000000020 /* ../../Shared/Models/ApprovalMode.swift */,
 				B14000000000000000000010 /* CalendarSelectionTests.swift */,
 				B14000000000000000000011 /* ../../App/Services/CalendarSelection.swift */,
@@ -1038,6 +1050,10 @@
 				B13800000000000000000011 /* ApprovalModeTests.swift in Sources */,
 				B15000000000000000000002 /* ../../App/Models/MenuStructure.swift in Sources */,
 				B15000000000000000000004 /* MenuStructureTests.swift in Sources */,
+				B15000000000000000000012 /* ../../App/Models/OnboardingFlow.swift in Sources */,
+				B15000000000000000000014 /* OnboardingFlowTests.swift in Sources */,
+				B15000000000000000000022 /* ../../App/Models/RemoteAccessChecklist.swift in Sources */,
+				B15000000000000000000024 /* RemoteAccessChecklistTests.swift in Sources */,
 				B13800000000000000000021 /* ../../Shared/Models/ApprovalMode.swift in Sources */,
 				B14000000000000000000020 /* CalendarSelectionTests.swift in Sources */,
 				B14000000000000000000021 /* ../../App/Services/CalendarSelection.swift in Sources */,
