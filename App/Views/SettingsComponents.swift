@@ -141,7 +141,8 @@ struct RowLabel<Icon: View>: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        // An address or a path keeps both ends. A sentence keeps its start.
+                        .truncationMode(subtitle.contains("/") ? .middle : .tail)
                 }
             }
         }

@@ -57,7 +57,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.window = window
         window.delegate = self
         window.makeKeyAndOrderFront(nil)
-        // The first text field would otherwise open with its text selected.
+        Self.clearInitialFocus(in: window)
+    }
+
+    /// A window gives its first text field the focus when it opens, which shows that field's text selected.
+    /// Nothing in Settings should start out being edited.
+    static func clearInitialFocus(in window: NSWindow) {
         DispatchQueue.main.async { window.makeFirstResponder(nil) }
     }
 
