@@ -87,6 +87,10 @@ struct CloudflareChecklistView: View {
                     }
                     .padding(.leading, 28)
                 }
+                if item.kind == .signIn {
+                    CloudflareTokenEntry(cloudflare: cloudflare)
+                        .padding(.leading, 28)
+                }
                 if item.kind == .domain, cloudflare.zones.count > 1 {
                     Picker("Domain", selection: $cloudflare.selectedZoneID) {
                         ForEach(cloudflare.zones) { zone in Text(zone.name).tag(zone.id) }

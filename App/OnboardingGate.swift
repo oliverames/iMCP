@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import Combine
 import Foundation
 import SwiftUI
@@ -29,6 +30,7 @@ enum OnboardingGate {
 @MainActor
 final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     static let shared = OnboardingWindowController()
+    private static let log = Logger(subsystem: "com.amesconsulting.imcp.mac", category: "onboarding.window")
 
     private var model: OnboardingModel?
     private var measure: ((NSSize) -> NSSize)?
@@ -107,7 +109,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
-        window.backgroundColor = .clear
+        // Opaque, so a window that is a little taller than its step shows the window's own background
+        // with its real rounded corners, not a transparent strip above square-cornered content.
+        window.backgroundColor = .windowBackgroundColor
         window.isReleasedWhenClosed = false
         return window
     }
@@ -127,6 +131,15 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
         frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
         let animates = animate && window.isVisible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         window.setFrame(frame, display: true, animate: animates)
+        Self.log.notice(
+            """
+            fit step \(self.model?.step.rawValue ?? "?", privacy: .public): fitting \(NSStringFromSize(fitting), privacy: .public), \
+            available \(available, privacy: .public), size \(NSStringFromSize(size), privacy: .public), \
+            frame \(NSStringFromRect(frame), privacy: .public), \
+            contentView \(NSStringFromRect(window.contentView?.frame ?? .zero), privacy: .public), \
+            contentLayoutRect \(NSStringFromRect(window.contentLayoutRect), privacy: .public)
+            """
+        )
     }
 
     func windowDidChangeScreen(_ notification: Notification) {
