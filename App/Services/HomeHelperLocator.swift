@@ -50,14 +50,14 @@ enum HomeHelperLocator {
     }
 
     /// Maps what is bundled and what `SMAppService` reports to a state.
-    /// `.notFound` means that macOS doesn't know the plist, which happens when it isn't in the bundle.
+    /// An agent that was never registered reports `.notFound` even though its plist is in the bundle
+    /// (seen on macOS 27), so whether the build carries the plist decides between the two.
     static func state(isBundled: Bool, status: SMAppService.Status) -> State {
         guard isBundled else { return .notBundled }
         switch status {
         case .enabled: return .registered
         case .requiresApproval: return .needsApproval
-        case .notRegistered: return .notRegistered
-        case .notFound: return .notBundled
+        case .notRegistered, .notFound: return .notRegistered
         @unknown default: return .notRegistered
         }
     }

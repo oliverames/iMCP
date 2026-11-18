@@ -10,7 +10,7 @@ set -euo pipefail
 
 # Developer ID builds can't carry the HomeKit entitlement,
 # so release builds leave the helper out;
-# developers build and sign it with Scripts/install-helper.sh.
+# a build signed with a team that has the HomeKit capability embeds it.
 if [[ "${EMBED_HOME_HELPER:-YES}" != YES ]]; then
     echo "Skipping iMCP Helper (EMBED_HOME_HELPER=${EMBED_HOME_HELPER})."
     # Remove a helper left by an earlier build in the same directory.
@@ -33,6 +33,11 @@ xcodebuild_args=(
 )
 if [[ "$helper_signing" == YES ]]; then
     xcodebuild_args+=(-allowProvisioningUpdates)
+fi
+# A build of iMCP with its own bundle identifier names its helper after it
+# (HomeHelperIdentity finds the app from the helper's identifier), so pass the choice through.
+if [[ -n "${HELPER_BUNDLE_IDENTIFIER:-}" ]]; then
+    xcodebuild_args+=(HELPER_BUNDLE_IDENTIFIER="$HELPER_BUNDLE_IDENTIFIER")
 fi
 xcodebuild_args+=(
     CODE_SIGNING_ALLOWED="$helper_signing"

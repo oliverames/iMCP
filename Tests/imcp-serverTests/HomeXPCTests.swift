@@ -179,7 +179,9 @@ final class HomeHelperLocatorTests: XCTestCase {
     func testStateFollowsWhatIsBundledAndWhatMacOSReports() {
         typealias Locator = HomeHelperLocator
         XCTAssertEqual(Locator.state(isBundled: false, status: .enabled), .notBundled)
-        XCTAssertEqual(Locator.state(isBundled: true, status: .notFound), .notBundled)
+        XCTAssertEqual(Locator.state(isBundled: false, status: .notFound), .notBundled)
+        // A never-registered agent reports notFound.
+        XCTAssertEqual(Locator.state(isBundled: true, status: .notFound), .notRegistered)
         XCTAssertEqual(Locator.state(isBundled: true, status: .notRegistered), .notRegistered)
         XCTAssertEqual(Locator.state(isBundled: true, status: .requiresApproval), .needsApproval)
         XCTAssertEqual(Locator.state(isBundled: true, status: .enabled), .registered)

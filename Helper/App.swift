@@ -4,14 +4,27 @@ import UIKit
 
 @main
 struct HelperApp: App {
-    @StateObject private var runtime = HelperRuntime()
+    @UIApplicationDelegateAdaptor(HelperAppDelegate.self) private var delegate
 
     var body: some Scene {
         WindowGroup {
-            HelperView(runtime: runtime)
-                .task { runtime.start() }
+            HelperView(runtime: .shared)
+                .task { HelperRuntime.shared.start() }
         }
         .windowResizability(.contentSize)
+    }
+}
+
+/// Starts the XPC listener when the process launches.
+/// launchd starts the helper on iMCP's first XPC message, possibly in the background,
+/// and the window, which used to start everything, can appear much later or not at all.
+final class HelperAppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        Task { @MainActor in HelperRuntime.shared.start() }
+        return true
     }
 }
 
@@ -51,6 +64,8 @@ struct HelperView: View {
 
 @MainActor
 final class HelperRuntime: ObservableObject {
+    static let shared = HelperRuntime()
+
     struct Status {
         let text: String
         let symbol: String
