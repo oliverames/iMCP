@@ -1,20 +1,24 @@
 import AppKit
 import ServiceManagement
+import Sparkle
 import SwiftUI
 
+/// The Settings window: a sidebar with the app tabs and the Services section, and the pane that is selected.
+/// The window can be resized, and the sidebar can be collapsed.
 struct SettingsView: View {
     @ObservedObject var serverController: ServerController
     var isMenuBarExtraInserted: Bool
+    var updater: SPUUpdater?
 
     // Settings reopens to the pane that was open last.
     @AppStorage("settingsPane") private var pane = SettingsPane.general
+    @State private var columnVisibility = NavigationSplitViewVisibility.all
 
     var body: some View {
         let configs = serverController.computedServiceConfigs
         let selection = selection(in: configs)
 
-        // Settings has no sidebar button, so the sidebar always shows.
-        NavigationSplitView(columnVisibility: .constant(.all)) {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             List(
                 selection: Binding(
                     get: { selection },
@@ -23,14 +27,10 @@ struct SettingsView: View {
                     }
                 )
             ) {
-                Label("General", systemImage: "gearshape")
-                    .tag(SettingsPane.general)
-                Label("Clients", systemImage: "app.connected.to.app.below.fill")
-                    .tag(SettingsPane.clients)
-                Label("iPhone & iPad", systemImage: "ipad.and.iphone")
-                    .tag(SettingsPane.mobile)
-                Label("Remote Access", systemImage: "network")
-                    .tag(SettingsPane.remoteAccess)
+                ForEach(SettingsPane.tabs, id: \.self) { tab in
+                    Label(tab.title, systemImage: tab.symbol)
+                        .tag(tab)
+                }
 
                 Section("Services") {
                     ForEach(configs) { config in
@@ -44,15 +44,15 @@ struct SettingsView: View {
                     }
                 }
             }
-            .toolbar(removing: .sidebarToggle)
-            .navigationSplitViewColumnWidth(200)
+            .navigationSplitViewColumnWidth(min: 170, ideal: 200, max: 260)
         } detail: {
             Group {
                 switch selection {
                 case .general:
                     GeneralSettingsView(
                         serverController: serverController,
-                        isMenuBarExtraInserted: isMenuBarExtraInserted
+                        isMenuBarExtraInserted: isMenuBarExtraInserted,
+                        updater: updater
                     )
                 case .clients:
                     ClientsSettingsView(serverController: serverController)
@@ -60,6 +60,8 @@ struct SettingsView: View {
                     MobileSettingsView(serverController: serverController)
                 case .remoteAccess:
                     RemoteAccessSettingsView(serverController: serverController)
+                case .advanced:
+                    AdvancedSettingsView(serverController: serverController)
                 case .service(let id):
                     if let config = configs.first(where: { $0.id == id }) {
                         ServiceSettingsView(serverController: serverController, config: config)
@@ -68,10 +70,14 @@ struct SettingsView: View {
                     }
                 }
             }
-            // The detail column is always loaded, unlike a sidebar that the window restores collapsed.
-            .background(NonCollapsibleSidebar())
+            .background(SettingsWindowConfigurator())
         }
-        .frame(width: 715, height: 560)
+        .frame(
+            minWidth: SettingsWindowConfigurator.minimumSize.width,
+            idealWidth: SettingsWindowConfigurator.defaultSize.width,
+            minHeight: SettingsWindowConfigurator.minimumSize.height,
+            idealHeight: SettingsWindowConfigurator.defaultSize.height
+        )
     }
 
     /// The stored pane, or General if the stored pane is for a service that this build doesn't include.
@@ -83,108 +89,45 @@ struct SettingsView: View {
     }
 }
 
-/// Keeps people from dragging the Settings sidebar closed.
-/// Settings has no sidebar button or View menu to show it again,
-/// and SwiftUI has no setting for this, so this changes the sidebar's split view item.
-private struct NonCollapsibleSidebar: NSViewRepresentable {
-    func makeNSView(context: Context) -> WindowReaderView {
-        WindowReaderView()
-    }
-
-    func updateNSView(_ nsView: WindowReaderView, context: Context) {
-        nsView.keepSidebarExpanded()
-    }
-
-    final class WindowReaderView: NSView {
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            keepSidebarExpanded()
-        }
-
-        func keepSidebarExpanded() {
-            guard let contentView = window?.contentView,
-                let controller = splitViewController(in: contentView)
-            else { return }
-            for item in controller.splitViewItems where item.behavior == .sidebar {
-                item.canCollapse = false
-                // The window can restore a sidebar that was collapsed before this change.
-                if item.isCollapsed {
-                    DispatchQueue.main.async { item.isCollapsed = false }
-                }
-            }
-        }
-
-        private func splitViewController(in view: NSView) -> NSSplitViewController? {
-            if let splitView = view as? NSSplitView,
-                let controller = splitView.delegate as? NSSplitViewController
-            {
-                return controller
-            }
-            for subview in view.subviews {
-                if let controller = splitViewController(in: subview) {
-                    return controller
-                }
-            }
-            return nil
-        }
-    }
-}
-
-/// A pane in Settings, stored as its raw value so that Settings can reopen to it.
-enum SettingsPane: Hashable, RawRepresentable {
-    case general
-    case clients
-    case mobile
-    case remoteAccess
-    /// The pane for the service with this ``ServiceConfig/id``.
-    case service(String)
-
-    init(rawValue: String) {
-        switch rawValue {
-        case "general": self = .general
-        case "clients": self = .clients
-        case "mobile": self = .mobile
-        case "remoteAccess": self = .remoteAccess
-        default: self = .service(rawValue)
-        }
-    }
-
-    var rawValue: String {
-        switch self {
-        case .general: "general"
-        case .clients: "clients"
-        case .mobile: "mobile"
-        case .remoteAccess: "remoteAccess"
-        case .service(let id): id
-        }
-    }
-}
-
 struct GeneralSettingsView: View {
     @ObservedObject var serverController: ServerController
     @AppStorage("showMenuBarExtra") private var showMenuBarExtra = true
     @AppStorage("isEnabled") private var isEnabled = true
     var isMenuBarExtraInserted: Bool
+    var updater: SPUUpdater?
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+
+    private var version: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info?["CFBundleVersion"] as? String ?? "?"
+        return "Version \(short) (\(build))"
+    }
 
     var body: some View {
         Form {
             Section {
-                Toggle(isOn: $showMenuBarExtra) {
-                    Text("Show in Menu Bar")
-                    if showMenuBarExtra && !isMenuBarExtraInserted {
-                        if #available(macOS 26.0, *) {
-                            Text("macOS hid the menu bar icon. Check System Settings > Menu Bar.")
-                        } else {
-                            Text("macOS hid the menu bar icon.")
-                        }
+                Toggle(isOn: $isEnabled) {
+                    RowLabel(title: "Server", subtitle: isEnabled ? nil : "Off. AI apps can't connect.") {
+                        SettingsIcon(symbol: "power", color: .green)
                     }
-                    Text("If the icon is hidden, open iMCP again to return to Settings.")
+                }
+
+                Toggle(isOn: $showMenuBarExtra) {
+                    RowLabel(
+                        title: "Show in menu bar",
+                        subtitle: showMenuBarExtra && !isMenuBarExtraInserted
+                            ? "macOS hid the icon. Check System Settings."
+                            : nil
+                    ) {
+                        SettingsIcon(symbol: "menubar.rectangle", color: .blue)
+                    }
                 }
 
                 Toggle(isOn: $launchAtLogin) {
-                    Text("Launch at Login")
-                    Text("Opens iMCP automatically when you log in.")
+                    RowLabel(title: "Launch at login") {
+                        SettingsIcon(symbol: "sunrise.fill", color: .orange)
+                    }
                 }
                 .onChange(of: launchAtLogin) { _, enabled in
                     do {
@@ -197,377 +140,56 @@ struct GeneralSettingsView: View {
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 }
+            }
 
+            Section {
+                Picker(
+                    selection: Binding(
+                        get: { serverController.approvalMode },
+                        set: { serverController.approvalMode = $0 }
+                    )
+                ) {
+                    ForEach(ApprovalMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                } label: {
+                    RowLabel(title: "Ask before", subtitle: serverController.approvalMode.settingsCaption) {
+                        SettingsIcon(symbol: "hand.raised.fill", color: .purple)
+                    }
+                }
+                .pickerStyle(.menu)
+            } header: {
+                SectionTitle(title: "Approvals", symbol: "checkmark.shield")
+            }
+
+            Section {
                 LabeledContent {
-                    Button("Set Up iMCP…") {
+                    Button("Open…") {
                         OnboardingWindowController.shared.present(
                             serverController: serverController,
                             isEnabled: $isEnabled
                         )
                     }
                 } label: {
-                    Text("Setup Assistant")
-                    Text("Guided setup for services, remote tunnels, iPhone pairing, and connecting AI apps.")
+                    RowLabel(title: "Setup Assistant") {
+                        SettingsIcon(symbol: "wand.and.stars", color: .indigo)
+                    }
+                }
+
+                LabeledContent {
+                    Button("Check Now") { updater?.checkForUpdates() }
+                        .disabled(!(updater?.canCheckForUpdates ?? false))
+                } label: {
+                    RowLabel(title: "Updates", subtitle: version) {
+                        SettingsIcon(symbol: "arrow.triangle.2.circlepath", color: .teal)
+                    }
                 }
             }
-
-            ApprovalModeSection(serverController: serverController)
         }
         .formStyle(.grouped)
         .navigationTitle("General")
         .onAppear {
             launchAtLogin = SMAppService.mainApp.status == .enabled
-        }
-    }
-}
-
-private struct ApprovalModeSection: View {
-    @ObservedObject var serverController: ServerController
-    @State private var expandedAgents: Set<String> = ["claude-desktop", "claude-code"]
-
-    private var selectedMode: ApprovalMode {
-        serverController.approvalMode
-    }
-
-    var body: some View {
-        Section {
-            ForEach(ApprovalMode.allCases) { mode in
-                Button {
-                    serverController.approvalMode = mode
-                } label: {
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: selectedMode == mode ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(selectedMode == mode ? Color.accentColor : .secondary)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(mode.title)
-                                .foregroundStyle(.primary)
-                            Text(mode.summary)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selectedMode == mode ? [.isSelected] : [])
-            }
-        } header: {
-            Text("Approval Mode")
-        } footer: {
-            Text(
-                "Applies to tool calls across all enabled services. Changing between iMCP-managed and full-access modes updates the tools offered to connected clients."
-            )
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-
-        if selectedMode.showsAgentConfigurationHelp {
-            Section {
-                ForEach(selectedMode.agentInstructions) { instruction in
-                    DisclosureGroup(isExpanded: binding(for: instruction.id)) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(instruction.instructions)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            if let snippet = instruction.codeSnippet {
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text(snippet)
-                                        .font(.caption.monospaced())
-                                        .textSelection(.enabled)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .fill(Color(NSColor.textBackgroundColor))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 6)
-                                                .stroke(Color(NSColor.separatorColor))
-                                        )
-
-                                    Button("Copy") {
-                                        let pasteboard = NSPasteboard.general
-                                        pasteboard.clearContents()
-                                        pasteboard.setString(snippet, forType: .string)
-                                        _ = NSSound.play(.pop)
-                                    }
-                                    .controlSize(.small)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    } label: {
-                        Text(instruction.agentName)
-                            .fontWeight(.medium)
-                    }
-                }
-            } header: {
-                Text("Agent Setup Instructions")
-            } footer: {
-                if let heading = selectedMode.agentInstructionsHeading {
-                    Text(heading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-        }
-    }
-
-    private func binding(for agentID: String) -> Binding<Bool> {
-        Binding(
-            get: { expandedAgents.contains(agentID) },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedAgents.insert(agentID)
-                } else {
-                    expandedAgents.remove(agentID)
-                }
-            }
-        )
-    }
-}
-
-struct ClientsSettingsView: View {
-    @ObservedObject var serverController: ServerController
-    @State private var isConfirmingRemoveAll = false
-    @State private var isAdvancedExpanded = false
-    @State private var editingToken: IdentifiableAccessToken?
-    @State private var isCreatingToken = false
-    @State private var revealedSecret: (name: String, secret: String)?
-
-    private let serverCommand = Bundle.main.bundleURL
-        .appendingPathComponent("Contents/MacOS/imcp-server")
-        .path
-
-    var body: some View {
-        let trustedClients = serverController.trustedClients
-        let legacyTrustedClientNames = serverController.legacyTrustedClientNames
-        let publicURLs = serverController.activePublicURLs
-
-        Form {
-            Section("Apps on This Mac") {
-                LabeledContent {
-                    Button("Set Up…") {
-                        ClaudeDesktop.showConfigurationPanel(serverController: serverController)
-                    }
-                } label: {
-                    Text("Claude Desktop")
-                    Text("Adds iMCP to Claude Desktop's MCP servers.")
-                }
-
-                LabeledContent {
-                    Button("Set Up…") {
-                        ClaudeCode.showConfigurationPanel(serverController: serverController)
-                    }
-                } label: {
-                    Text("Claude Code")
-                    Text("Adds iMCP to Claude Code's user settings (~/.claude.json).")
-                }
-            }
-
-            Section {
-                if publicURLs.isEmpty {
-                    LabeledContent {
-                        Button("Open Remote Access…") {
-                            UserDefaults.standard.set(SettingsPane.remoteAccess.rawValue, forKey: "settingsPane")
-                        }
-                    } label: {
-                        Text("No Public Tunnel Active")
-                        Text("Turn on Cloudflare Tunnel or Tailscale Funnel in Remote Access to connect cloud agents.")
-                    }
-                } else {
-                    ForEach(publicURLs, id: \.url) { item in
-                        LabeledContent(publicURLs.count > 1 ? item.provider : "Connector URL") {
-                            HStack {
-                                Text(item.url)
-                                    .font(.callout.monospaced())
-                                    .textSelection(.enabled)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                Button("Copy URL") {
-                                    let pasteboard = NSPasteboard.general
-                                    pasteboard.clearContents()
-                                    pasteboard.setString(item.url, forType: .string)
-                                    _ = NSSound.play(.pop)
-                                }
-                            }
-                        }
-                    }
-
-                    if let primaryURL = publicURLs.first?.url {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("• **claude.ai**: Settings -> Connectors -> Add custom connector -> paste `\(primaryURL)` -> Connect.")
-                                .font(.caption)
-                            Text("• **Claude Duet**: Add custom MCP connector -> paste `\(primaryURL)` -> approve once in iMCP.")
-                                .font(.caption)
-                            Text("• **Muse**: Add MCP server URL `\(primaryURL)` (supports OAuth 2.1).")
-                                .font(.caption)
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 2)
-                    }
-                }
-            } header: {
-                Text("Cloud Connectors (claude.ai, Claude Duet, Muse)")
-            } footer: {
-                Text("Cloud agents authenticate with OAuth 2.1 and refresh their access automatically after you approve them once.")
-            }
-
-            Section {
-                if trustedClients.isEmpty {
-                    VStack(spacing: 4) {
-                        Text("No Trusted Mac Apps")
-                        Text("Choose Always Allow the first time an app connects.")
-                            .font(.caption)
-                    }
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                } else {
-                    ForEach(trustedClients) { client in
-                        TrustedAppRow(client: client) {
-                            serverController.removeTrustedClient(client)
-                        }
-                    }
-                }
-            } header: {
-                Text("Trusted Mac Apps & CLI Clients")
-            } footer: {
-                VStack(alignment: .trailing) {
-                    Text(
-                        "Trusted apps connect without an approval dialog. iMCP verifies GUI apps by code signature and terminal clients by an automatic local credential."
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    if !trustedClients.isEmpty || !legacyTrustedClientNames.isEmpty {
-                        Button("Remove All…") {
-                            isConfirmingRemoveAll = true
-                        }
-                    }
-                }
-            }
-
-            if !serverController.oauthConnections.grants.isEmpty || !publicURLs.isEmpty {
-                ConnectedOAuthAppsSection(model: serverController.oauthConnections)
-            }
-
-            if !legacyTrustedClientNames.isEmpty {
-                Section {
-                    ForEach(legacyTrustedClientNames, id: \.self) { name in
-                        LabeledContent(name) {
-                            Button("Remove") {
-                                serverController.removeLegacyTrustedClient(name)
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Approve Again")
-                } footer: {
-                    Text(
-                        "Earlier versions of iMCP trusted these clients by reported name. They need your approval the next time they connect."
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-
-            Section {
-                DisclosureGroup("Developer & Advanced", isExpanded: $isAdvancedExpanded) {
-                    LabeledContent {
-                        Button("Copy") {
-                            let pasteboard = NSPasteboard.general
-                            pasteboard.clearContents()
-                            pasteboard.setString(serverCommand, forType: .string)
-                            _ = NSSound.play(.pop)
-                        }
-                    } label: {
-                        Text("Local stdio Server Binary")
-                        Text(serverCommand)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                    }
-                    .padding(.top, 4)
-                }
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle("Clients")
-        .alert("Remove All Trusted Apps?", isPresented: $isConfirmingRemoveAll) {
-            Button("Remove All", role: .destructive) {
-                serverController.resetTrustedClients()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Each app needs your approval again the next time it connects.")
-        }
-    }
-}
-
-private struct IdentifiableAccessToken: Identifiable {
-    let id = UUID()
-    let token: AccessToken?
-}
-
-/// Connected OAuth 2.1 cloud apps, shown in the Clients pane.
-struct ConnectedOAuthAppsSection: View {
-    @ObservedObject var model: OAuthConnectionsModel
-    @State private var appToRevoke: OAuthGrant?
-    @State private var revokeError: String?
-
-    var body: some View {
-        Section {
-            if let error = model.storageError {
-                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.secondary)
-            } else if model.grants.isEmpty {
-                Text("No cloud apps connected yet.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(model.grants) { grant in
-                    LabeledContent {
-                        Button("Revoke…", role: .destructive) { appToRevoke = grant }
-                    } label: {
-                        Text(grant.clientName)
-                        Text("Returns to \(grant.redirectHost)")
-                        Text(
-                            "Connected \(grant.createdAt.formatted(date: .abbreviated, time: .omitted)). "
-                                + (grant.lastUsedAt.map {
-                                    "Last used \($0.formatted(.relative(presentation: .named)))."
-                                } ?? "Not used yet.")
-                        )
-                    }
-                }
-            }
-        } header: {
-            Text("Connected Cloud Apps (OAuth)")
-        } footer: {
-            Text("Revoking a cloud app ends its access right away.")
-        }
-        .confirmationDialog(
-            "Revoke \"\(appToRevoke?.clientName ?? "")\"?",
-            isPresented: Binding(get: { appToRevoke != nil }, set: { if !$0 { appToRevoke = nil } }),
-            presenting: appToRevoke
-        ) { grant in
-            Button("Revoke", role: .destructive) {
-                do {
-                    try model.revoke(grant.id)
-                } catch {
-                    revokeError = error.localizedDescription
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        }
-        .alert(
-            "Couldn't Revoke the App",
-            isPresented: Binding(get: { revokeError != nil }, set: { if !$0 { revokeError = nil } })
-        ) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(revokeError ?? "")
         }
     }
 }

@@ -9,7 +9,11 @@ final class OnboardingNavigatorTests: XCTestCase {
     func testFirstRunHasASingleWelcomeThenFiveDots() {
         var nav = OnboardingNavigator(mode: .firstRun, progress: OnboardingProgress())
         XCTAssertEqual(nav.step, .welcome)
-        XCTAssertEqual(nav.pageSteps, [.services, .remoteAccess, .connectApps, .iPhone, .done])
+        XCTAssertEqual(
+            nav.pageSteps,
+            [.services, .remoteAccess, .connectApps, .iPhone, .done],
+            "Local only needs no setup screen, so it has no dot"
+        )
         XCTAssertNil(nav.pageIndex, "the Welcome keeps its own layout without dots")
         XCTAssertFalse(nav.canGoBack, "Welcome closes with Not Now")
         nav.advance()
@@ -28,6 +32,41 @@ final class OnboardingNavigatorTests: XCTestCase {
         XCTAssertEqual(seen, [.welcome, .services, .remoteAccess, .connectApps, .iPhone, .done])
         nav.advance()
         XCTAssertEqual(nav.step, .done, "Done is the end")
+    }
+
+    func testAChosenWayGetsItsOwnSetupScreen() {
+        for choice in [RemoteChoice.tailscale, .funnel, .cloudflare] {
+            var nav = OnboardingNavigator(mode: .firstRun, progress: OnboardingProgress())
+            nav.advance()
+            nav.advance()
+            XCTAssertEqual(nav.step, .remoteAccess)
+            nav.setRemoteChoice(choice)
+            XCTAssertEqual(
+                nav.pageSteps,
+                [.services, .remoteAccess, .remoteSetup, .connectApps, .iPhone, .done],
+                "\(choice) gets a dot for its setup"
+            )
+            nav.advance()
+            XCTAssertEqual(nav.step, .remoteSetup, "\(choice)")
+            nav.advance()
+            XCTAssertEqual(nav.step, .connectApps)
+            nav.goBack()
+            XCTAssertEqual(nav.step, .remoteSetup)
+            nav.goBack()
+            XCTAssertEqual(nav.step, .remoteAccess)
+        }
+    }
+
+    func testChangingBackToLocalOnlySkipsTheSetupScreen() {
+        var nav = OnboardingNavigator(mode: .firstRun, progress: OnboardingProgress())
+        nav.advance()
+        nav.advance()
+        nav.setRemoteChoice(.cloudflare)
+        nav.setRemoteChoice(.local)
+        nav.advance()
+        XCTAssertEqual(nav.step, .connectApps)
+        nav.goBack()
+        XCTAssertEqual(nav.step, .remoteAccess, "Back never lands on a screen that was skipped")
     }
 
     func testBackRetracesTheScreensShown() {
@@ -85,8 +124,8 @@ final class OnboardingNavigatorTests: XCTestCase {
         XCTAssertFalse(nav.canGoBack, "Done ends the flow, as in Ping Warden")
     }
 
-    func testOnlyRemoteAccessAndIPhoneAreOptional() {
-        XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.remoteAccess, .iPhone])
+    func testOnlyTheRemoteScreensAndIPhoneAreOptional() {
+        XCTAssertEqual(OnboardingStep.allCases.filter(\.isOptional), [.remoteAccess, .remoteSetup, .iPhone])
     }
 }
 
