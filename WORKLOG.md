@@ -1,5 +1,19 @@
 # Worklog
 
+## 2026-11-20 - Helped on Mattt's TopoText edit engine and the iMCP CI cache
+
+**What changed**:
+
+- **mattt/TopoText#5** (`oliverames:fix/notes-edit-tests-typecheck` → `mattt/notes-edit-engine`): the Test step on Mattt's Notes edit engine PR (#4) fails on Swift 6.1 and 6.2 with "the compiler is unable to type-check this expression in reasonable time" at `NoteEditorTests.swift:606`. The line builds the expected field list as one long array concatenation. The PR builds it in a few statements instead. Verified locally on Swift 6.4: `swift test` 234 tests in 24 suites, 0 failures; `swift format lint --strict` clean. No CI checks have appeared on the PR yet (first-time contributor, so the workflow may need Mattt's approval).
+- **mattt/iMCP#393** (`oliverames:ci-drop-all-module-caches` → `main`): the macOS 26 CI job is red on the recent PRs, and it is not a test failure. It fails in different steps on different runs (Test once, Build on the latest run) with a stale module cache: the runner image now has Xcode 26.0.1 while the cached `.pcm` was built by 26.0. The cache key already includes the Xcode build number, but the cleanup step only removed `DerivedData/ModuleCache.noindex`; the `iMCP Helper` target keeps a second module cache under `DerivedData/.../HelperDerivedData/ModuleCache.noindex`, which stayed in the saved archive. The PR removes every `ModuleCache.noindex` under `DerivedData` before saving.
+- Corrected the #390 PR body: the macOS 26 failure is this cache issue, not a test, and the final cleaned run failed on Build while the earlier diagnostic run had passed on both jobs.
+
+**Decisions made**: The CI cache fix is a separate PR rather than a change to #390, so the AppleScript PR stays scoped. TopoText help goes through Oliver's fork and a PR to `mattt/notes-edit-engine`, per the fork rules.
+
+**Left off at**: Waiting on Mattt for TopoText#5 and iMCP#393, and on his re-review of #373/#377/#378/#384/#390. Still open: #385 and #391 findings, and the #385 signed sandboxed files pass.
+
+---
+
 ## 2026-11-20 - Finished #390 and #373, and ran the real-calendar pass
 
 **What changed**:
