@@ -395,7 +395,6 @@ enum NotesOrganizeTools {
                 let html =
                     switch try format(in: arguments) {
                     case .plaintext: NotesHTML.html(fromPlainText: text)
-                    case .html: text
                     case .markdown: NotesMarkdown.html(from: text)
                     }
                 var expected: String?

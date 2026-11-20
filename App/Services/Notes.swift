@@ -216,10 +216,17 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                         : "The contents of the notes in unreadableNoteIDs could not be read, so the search matched them by title and preview alone. These notes can contain the query without appearing in the results."
                 )
             }
-            if page.stoppedEarly {
-                caveats.append(
-                    "The search read the contents of \(Self.contentReadLimit) notes without filling the page, so more notes can match. Pass nextCursor as cursor to continue."
-                )
+            if let stoppedEarly = page.stoppedEarly {
+                switch stoppedEarly {
+                case .contentRead:
+                    caveats.append(
+                        "The search read the contents of \(Self.contentReadLimit) notes without filling the page, so more notes can match. Pass nextCursor as cursor to continue."
+                    )
+                case .metadataScan:
+                    caveats.append(
+                        "The search scanned \(Self.metadataScanLimit) notes without filling the page, so more notes can match. Pass nextCursor as cursor to continue."
+                    )
+                }
             }
             if !caveats.isEmpty {
                 list["description"] = .string(caveats.joined(separator: " "))
@@ -598,18 +605,24 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
     /// The most notes whose contents one `notes_fetch` call reads to apply a filter,
     /// which bounds the time of a call whose filters match few notes.
     private static let contentReadLimit = 500
+    private static let metadataScanLimit = 2_000
     private static let tagScanDefault = 500
     private static let tagScanMaximum = 5_000
 
     /// One page of notes, after the filters that TopoText can't apply.
     private struct NotesPage: Sendable {
+        enum StoppedEarly: Sendable {
+            case contentRead
+            case metadataScan
+        }
+
         var notes: [TopoText.Note] = []
         var nextCursor: TopoText.Note.FetchRequest.Cursor?
         var unreadableNoteIDs: [TopoText.Note.ID] = []
         /// What the contents of each note hold, for the notes whose contents were read.
         var traits: [TopoText.Note.ID: NoteTraits] = [:]
-        /// Whether the search stopped at ``contentReadLimit`` before filling the page.
-        var stoppedEarly = false
+        /// Whether the search hit a scan limit before filling the page.
+        var stoppedEarly: StoppedEarly?
     }
 
     /// Searches the notes, then keeps those that pass the filter.
@@ -627,9 +640,11 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         var request = request
         var page = NotesPage()
         var read = 0
+        var scanned = 0
         while page.notes.count < wanted {
             request.limit = wanted - page.notes.count
             let result = try snapshot.search(request)
+            scanned += result.notes.count
             let matchedByPreview = Set(result.unreadableNoteIDs)
             for note in result.notes {
                 guard
@@ -660,9 +675,15 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
             page.nextCursor = result.nextCursor
             guard result.nextCursor != nil else { break }
             request.cursor = result.nextCursor
-            if page.notes.count < wanted, read >= contentReadLimit {
-                page.stoppedEarly = true
-                break
+            if page.notes.count < wanted {
+                if read >= contentReadLimit {
+                    page.stoppedEarly = .contentRead
+                    break
+                }
+                if scanned >= metadataScanLimit {
+                    page.stoppedEarly = .metadataScan
+                    break
+                }
             }
         }
         return page
