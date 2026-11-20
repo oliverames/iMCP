@@ -1,5 +1,18 @@
 # Worklog
 
+## 2026-11-20 - Finished the #385 and #391 code fixes
+
+**What changed**:
+
+- **#385** (`pr/files-v2`, force-pushed to `pr/files-service`): rebased onto the trimmed #377 and fixed Mattt's three findings. `files_stat` no longer unwraps `canonicalComponents.last!` for a link that resolves to the shared root (an empty canonical path is the root), with a test. `files_trash` reports `trashUnverified` when `F_GETPATH` fails instead of success, and reports `trashRestoreFailed` when putting a swapped item back fails instead of dropping the error. `write` closes its output descriptor when `writeAll` throws, on both the replace and create paths. 243 tests, 1 skipped, 0 failures.
+- **#391** (`pr/ios-outbox-liveness`): the outbox migration now copies each file and removes the old ones only when every copy matches its source; a failed checkpoint or copy leaves the old outbox in place, and `shared()` opens the old outbox until the migration is complete, so a partial migration can't strand records or anchors. `answers(within:)` no longer waits for the status call after the timer wins — the first of the call or the timer returns, and a silent socket can't hold the result open. `attach` remembers whether the device was paired before the liveness check and refuses a link for a device unpaired during the wait. 252 tests, 1 skipped, 0 failures.
+
+**Decisions made**: The unpair guard only refuses when the device was paired before the check, so the existing tests that attach unpaired fake links keep working and the production transition is what is caught. The signed sandboxed Files pass and the TopoText validation run are deferred to the end, per Oliver.
+
+**Left off at**: All code fixes Mattt asked for are in: #373, #377, #378, #384, #385, #390, #391. Waiting on his re-review. Deferred to the end: the #385 signed sandboxed files pass and the TopoText #4 validation run. #387/#388/#389 stay parked, #392 parked.
+
+---
+
 ## 2026-11-20 - Helped on Mattt's TopoText edit engine and the iMCP CI cache
 
 **What changed**:
