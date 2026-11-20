@@ -944,7 +944,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
 
     func testFunnelRequestsNeedATokenWhateverTheirAddress() async throws {
         let node = FakeTailnetNode(state: .running(me), peers: ["127.0.0.1": owner])
-        let (store, secret) = try makeStore()
+        let (store, secret) = try makeStore(publicAccess: true)
         let local = FakeLocalListener()
         let states = StateLog()
         let server = makeFunnelServer(store: store, node: node, local: local)
@@ -1047,7 +1047,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
 
     func testFunnelBlocksRepeatedBadTokensButNotGoodOnes() async throws {
         let node = FakeTailnetNode(state: .running(me), peers: [:])
-        let (store, secret) = try makeStore()
+        let (store, secret) = try makeStore(publicAccess: true)
         let local = FakeLocalListener()
         let server = makeFunnelServer(store: store, node: node, local: local)
         await server.configure(.init(isEnabled: true, port: 4627, hostname: "mac-imcp", funnelEnabled: true))
@@ -1239,7 +1239,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
 
     func testCloudflareHostStartsSharedLoopbackWithoutTailscale() async throws {
         let node = FakeTailnetNode(state: .running(me), peers: [:])
-        let (store, secret) = try makeStore()
+        let (store, secret) = try makeStore(publicAccess: true)
         let local = FakeLocalListener()
         let loopbackUpdates = LockedList<RemoteAccessServer.PublicLoopbackState>()
         let server = makeFunnelServer(store: store, node: node, local: local)
@@ -1279,7 +1279,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
 
     func testSharedLoopbackServesBothTailscaleFunnelAndCloudflareWithIsolatedOAuth() async throws {
         let node = FakeTailnetNode(state: .running(me), peers: [:])
-        let (store, secret) = try makeStore()
+        let (store, secret) = try makeStore(publicAccess: true)
         let local = FakeLocalListener()
         let authority = OAuthAuthority(storage: InMemoryOAuthGrantStorage())
         let server = makeFunnelServer(store: store, node: node, local: local, oauth: authority)
@@ -1356,7 +1356,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
     func testFunnelFailureKeepsSharedLoopbackAliveWhenCloudflareIsActive() async throws {
         let node = FakeTailnetNode(state: .running(me), peers: [:])
         node.funnelError = URLError(.userAuthenticationRequired)
-        let (store, secret) = try makeStore()
+        let (store, secret) = try makeStore(publicAccess: true)
         let local = FakeLocalListener()
         let states = StateLog()
         let server = makeFunnelServer(store: store, node: node, local: local)
@@ -1383,13 +1383,14 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
         XCTAssertEqual(local.shutdownCount, 1)
     }
 
-    private func makeStore() throws -> (AccessTokenStore, String) {
+    private func makeStore(publicAccess: Bool = false) throws -> (AccessTokenStore, String) {
         let suite = "RemoteAccessTests.\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         let storage = InMemoryAccessTokenStorage()
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let store = AccessTokenStore(storage: storage, defaults: defaults)
-        let (token, secret) = AccessToken.make(name: "iPad", permissions: .readOnly)
+        var (token, secret) = AccessToken.make(name: "iPad", permissions: .readOnly)
+        token.allowsPublicAccess = publicAccess
         try store.add(token)
         return (store, secret)
     }
@@ -1468,9 +1469,10 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
 }
 
 final class FunnelPolicyTests: XCTestCase {
-    private func makeToken(bound: Bool = false) -> (AccessToken, String) {
+    private func makeToken(bound: Bool = false, publicAccess: Bool = false) -> (AccessToken, String) {
         var (token, secret) = AccessToken.make(name: "Phone", permissions: .readOnly)
         if bound { token.boundDevice = .init(stableID: "nOwner", name: "iPad") }
+        token.allowsPublicAccess = publicAccess
         return (token, secret)
     }
 
@@ -1519,7 +1521,7 @@ final class FunnelPolicyTests: XCTestCase {
     }
 
     func testBearerTokenIsRequiredOnEveryRequest() {
-        let (token, secret) = makeToken()
+        let (token, secret) = makeToken(publicAccess: true)
         var limiter = FailedAuthLimiter()
         XCTAssertEqual(authorize("Bearer \(secret)", tokens: [token], limiter: &limiter), .allowed(token))
         XCTAssertEqual(authorize("bearer \(secret)", tokens: [token], limiter: &limiter), .allowed(token))
@@ -1528,14 +1530,20 @@ final class FunnelPolicyTests: XCTestCase {
         }
     }
 
-    func testTokensBoundToTailnetDevicesAreRejected() {
-        let (token, secret) = makeToken(bound: true)
+    func testTokensWithoutPublicAccessAreRejectedOnPublicRoutes() {
         var limiter = FailedAuthLimiter()
-        XCTAssertEqual(authorize("Bearer \(secret)", tokens: [token], limiter: &limiter), .boundToDevice)
+        // A token that isn't marked for public access is refused, whether or not it is bound to a device.
+        let (unbound, unboundSecret) = makeToken()
+        XCTAssertEqual(
+            authorize("Bearer \(unboundSecret)", tokens: [unbound], limiter: &limiter),
+            .boundToDevice
+        )
+        let (bound, boundSecret) = makeToken(bound: true)
+        XCTAssertEqual(authorize("Bearer \(boundSecret)", tokens: [bound], limiter: &limiter), .boundToDevice)
     }
 
     func testFailedAuthBlocksBadTokensForAWhile() {
-        let (token, secret) = makeToken()
+        let (token, secret) = makeToken(publicAccess: true)
         var limiter = FailedAuthLimiter(maximumFailures: 3, window: 60, blockDuration: 120)
         let start = Date(timeIntervalSince1970: 1_000_000)
         for _ in 0 ..< 3 {
@@ -1737,6 +1745,8 @@ final class CloudflareTunnelTests: XCTestCase {
                         ],
                     ]
                 )
+            case ("GET", "/client/v4/accounts/acc_1/cfd_tunnel/tun_123/configurations"):
+                return (status: 200, json: ["success": true, "result": ["config": ["ingress": []]]])
             case ("PUT", "/client/v4/accounts/acc_1/cfd_tunnel/tun_123/configurations"):
                 return (status: 200, json: ["success": true, "result": [:]])
             case ("GET", "/client/v4/zones/zone_1/dns_records"):
@@ -1782,6 +1792,7 @@ final class CloudflareTunnelTests: XCTestCase {
             [
                 "GET /client/v4/accounts/acc_1/cfd_tunnel",
                 "POST /client/v4/accounts/acc_1/cfd_tunnel",
+                "GET /client/v4/accounts/acc_1/cfd_tunnel/tun_123/configurations",
                 "PUT /client/v4/accounts/acc_1/cfd_tunnel/tun_123/configurations",
                 "GET /client/v4/zones/zone_1/dns_records",
                 "POST /client/v4/zones/zone_1/dns_records",
@@ -1790,18 +1801,18 @@ final class CloudflareTunnelTests: XCTestCase {
         )
         XCTAssertEqual(calls[1].jsonBody?["config_src"] as? String, "cloudflare")
 
-        let config = try XCTUnwrap(calls[2].jsonBody?["config"] as? [String: Any])
+        let config = try XCTUnwrap(calls[3].jsonBody?["config"] as? [String: Any])
         let ingress = try XCTUnwrap(config["ingress"] as? [[String: Any]])
         XCTAssertEqual(ingress.first?["hostname"] as? String, "imcp.amesvt.com")
         XCTAssertEqual(ingress.first?["service"] as? String, "http://127.0.0.1:54321")
         XCTAssertEqual(ingress.last?["service"] as? String, "http_status:404")
 
-        XCTAssertEqual(calls[4].jsonBody?["type"] as? String, "CNAME")
-        XCTAssertEqual(calls[4].jsonBody?["content"] as? String, "tun_123.cfargotunnel.com")
-        XCTAssertEqual(calls[4].jsonBody?["proxied"] as? Bool, true)
+        XCTAssertEqual(calls[5].jsonBody?["type"] as? String, "CNAME")
+        XCTAssertEqual(calls[5].jsonBody?["content"] as? String, "tun_123.cfargotunnel.com")
+        XCTAssertEqual(calls[5].jsonBody?["proxied"] as? Bool, true)
     }
 
-    func testProvisionTunnelAdoptsExistingTunnelAndUpdatesOutdatedCNAME() async throws {
+    func testProvisionTunnelAdoptsExistingTunnelButNeverOverwritesAForeignCNAME() async throws {
         let recorder = MockCloudflareTransport { request in
             let method = request.httpMethod ?? ""
             let path = request.url?.path ?? ""
@@ -1821,6 +1832,21 @@ final class CloudflareTunnelTests: XCTestCase {
                         ],
                     ]
                 )
+            case ("GET", "/client/v4/accounts/acc_1/cfd_tunnel/tun_existing/configurations"):
+                return (
+                    status: 200,
+                    json: [
+                        "success": true,
+                        "result": [
+                            "config": [
+                                "ingress": [
+                                    ["hostname": "old.example.com", "service": "http_status:503"],
+                                    ["hostname": NSNull(), "service": "http_status:404"],
+                                ]
+                            ]
+                        ],
+                    ]
+                )
             case ("PUT", "/client/v4/accounts/acc_1/cfd_tunnel/tun_existing/configurations"):
                 return (status: 200, json: ["success": true, "result": [:]])
             case ("GET", "/client/v4/zones/zone_1/dns_records"):
@@ -1834,6 +1860,90 @@ final class CloudflareTunnelTests: XCTestCase {
                                 "type": "CNAME",
                                 "name": "imcp.ames.consulting",
                                 "content": "old.cfargotunnel.com",
+                                "proxied": false,
+                            ]
+                        ],
+                    ]
+                )
+            case ("PUT", "/client/v4/zones/zone_1/dns_records/rec_old"):
+                XCTFail("A CNAME that points at another tunnel must not be overwritten")
+                return (status: 200, json: ["success": true, "result": [:]])
+            case ("GET", "/client/v4/accounts/acc_1/cfd_tunnel/tun_existing/token"):
+                return (status: 200, json: ["success": true, "result": "adopted_token"])
+            default:
+                XCTFail("Unexpected \(method) \(path)")
+                return (status: 404, json: ["success": false])
+            }
+        }
+
+        let client = CloudflareAPIClient(apiToken: "cf_secret", transport: recorder.transport)
+        do {
+            _ = try await client.provisionTunnel(
+                accountID: "acc_1",
+                zoneID: "zone_1",
+                hostname: "imcp.ames.consulting",
+                tunnelName: "imcp-mac",
+                localPort: 60000
+            )
+            XCTFail("Expected conflictingDNSRecord")
+        } catch let error as CloudflareError {
+            guard case .conflictingDNSRecord(let hostname, let type) = error else {
+                return XCTFail("Expected conflictingDNSRecord, got \(error)")
+            }
+            XCTAssertEqual(hostname, "imcp.ames.consulting")
+            XCTAssertEqual(type, "CNAME")
+        }
+        XCTAssertFalse(recorder.calls.contains { $0.method == "POST" })
+        XCTAssertFalse(recorder.calls.contains { $0.method == "PUT" && $0.path.hasSuffix("/dns_records") })
+
+        // The adopted tunnel still gets its ingress merged: its other rules stay, this hostname
+        // goes first, and a catch-all comes last.
+        let putConfig = try XCTUnwrap(
+            recorder.calls.first { $0.method == "PUT" && $0.path.hasSuffix("tun_existing/configurations") }
+        )
+        let config = try XCTUnwrap(putConfig.jsonBody?["config"] as? [String: Any])
+        let ingress = try XCTUnwrap(config["ingress"] as? [[String: Any]])
+        XCTAssertEqual(ingress.first?["hostname"] as? String, "imcp.ames.consulting")
+        XCTAssertEqual(ingress.first?["service"] as? String, "http://127.0.0.1:60000")
+        XCTAssertTrue(ingress.contains { ($0["hostname"] as? String) == "old.example.com" })
+        XCTAssertEqual(ingress.last?["service"] as? String, "http_status:404")
+    }
+
+    func testProvisionTunnelRepointsAStaleCNAMERecordForTheSameTunnel() async throws {
+        let recorder = MockCloudflareTransport { request in
+            let method = request.httpMethod ?? ""
+            let path = request.url?.path ?? ""
+            switch (method, path) {
+            case ("GET", "/client/v4/accounts/acc_1/cfd_tunnel"):
+                return (
+                    status: 200,
+                    json: [
+                        "success": true,
+                        "result": [
+                            [
+                                "id": "tun_existing",
+                                "name": "imcp-mac",
+                                "status": "healthy",
+                                "config_src": "cloudflare",
+                            ]
+                        ],
+                    ]
+                )
+            case ("GET", "/client/v4/accounts/acc_1/cfd_tunnel/tun_existing/configurations"):
+                return (status: 200, json: ["success": true, "result": ["config": ["ingress": []]]])
+            case ("PUT", "/client/v4/accounts/acc_1/cfd_tunnel/tun_existing/configurations"):
+                return (status: 200, json: ["success": true, "result": [:]])
+            case ("GET", "/client/v4/zones/zone_1/dns_records"):
+                return (
+                    status: 200,
+                    json: [
+                        "success": true,
+                        "result": [
+                            [
+                                "id": "rec_old",
+                                "type": "CNAME",
+                                "name": "imcp.ames.consulting",
+                                "content": "tun_existing.cfargotunnel.com",
                                 "proxied": false,
                             ]
                         ],
@@ -1872,7 +1982,13 @@ final class CloudflareTunnelTests: XCTestCase {
         XCTAssertEqual(result.tunnelID, "tun_existing")
         XCTAssertEqual(result.runToken, "adopted_token")
         XCTAssertFalse(recorder.calls.contains { $0.method == "POST" })
-        XCTAssertTrue(recorder.calls.contains { $0.method == "PUT" && $0.path.hasSuffix("/dns_records/rec_old") })
+
+        // The stale record for this same tunnel is re-proxied in place, not replaced.
+        let putRecord = try XCTUnwrap(
+            recorder.calls.first { $0.method == "PUT" && $0.path.hasSuffix("/dns_records/rec_old") }
+        )
+        XCTAssertEqual(putRecord.jsonBody?["content"] as? String, "tun_existing.cfargotunnel.com")
+        XCTAssertEqual(putRecord.jsonBody?["proxied"] as? Bool, true)
     }
 
     @MainActor
@@ -1921,6 +2037,8 @@ final class CloudflareTunnelTests: XCTestCase {
                         ],
                     ]
                 )
+            case ("GET", "/client/v4/accounts/acc_1/cfd_tunnel/tun_mac/configurations"):
+                return (status: 200, json: ["success": true, "result": ["config": ["ingress": []]]])
             case ("PUT", "/client/v4/accounts/acc_1/cfd_tunnel/tun_mac/configurations"):
                 return (status: 200, json: ["success": true, "result": [:]])
             case ("GET", "/client/v4/zones/zone_2/dns_records"):

@@ -291,25 +291,41 @@ struct CloudflareAPIClient: Sendable {
         hostname: String,
         serviceURL: String
     ) async throws {
-        struct IngressRule: Encodable {
+        struct IngressRule: Codable {
             let hostname: String?
             let service: String
         }
-        struct Config: Encodable {
-            let ingress: [IngressRule]
+        struct Config: Codable {
+            let ingress: [IngressRule]?
         }
-        struct Body: Encodable {
+        struct Body: Codable {
             let config: Config
         }
+        let path = "accounts/\(Self.pathComponent(accountID))/cfd_tunnel/\(Self.pathComponent(tunnelID))/configurations"
+        let normalizedHost = FunnelPolicy.normalizedHost(hostname)
+
+        // Preserve any existing ingress rules on an adopted tunnel rather than replacing them.
+        let existingRules: [IngressRule]
+        if let current: Body = try? await requestOptional(method: "GET", path: path) {
+            existingRules = current.config.ingress ?? []
+        } else {
+            existingRules = []
+        }
+
+        let catchAll =
+            existingRules.first(where: { $0.hostname == nil })
+            ?? IngressRule(hostname: nil, service: "http_status:404")
+        var merged = existingRules.filter { rule in
+            guard let existingHost = rule.hostname else { return false }
+            return FunnelPolicy.normalizedHost(existingHost) != normalizedHost
+        }
+        merged.insert(IngressRule(hostname: hostname, service: serviceURL), at: 0)
+        merged.append(catchAll)
+
         let _: EmptyResult? = try await requestOptional(
             method: "PUT",
-            path: "accounts/\(Self.pathComponent(accountID))/cfd_tunnel/\(Self.pathComponent(tunnelID))/configurations",
-            body: Body(
-                config: Config(ingress: [
-                    IngressRule(hostname: hostname, service: serviceURL),
-                    IngressRule(hostname: nil, service: "http_status:404"),
-                ])
-            )
+            path: path,
+            body: Body(config: Config(ingress: merged))
         )
     }
 
@@ -384,16 +400,19 @@ struct CloudflareAPIClient: Sendable {
         let existing = try await listDNSRecords(zoneID: zoneID, name: normalized)
 
         if let cname = existing.first(where: { $0.type.uppercased() == "CNAME" }) {
-            if FunnelPolicy.normalizedHost(cname.content) == target, cname.proxied == true {
-                return cname
+            let existingTarget = FunnelPolicy.normalizedHost(cname.content)
+            if existingTarget == target {
+                if cname.proxied == true { return cname }
+                return try await updateDNSRecord(
+                    zoneID: zoneID,
+                    recordID: cname.id,
+                    name: normalized,
+                    content: target,
+                    proxied: true
+                )
             }
-            return try await updateDNSRecord(
-                zoneID: zoneID,
-                recordID: cname.id,
-                name: normalized,
-                content: target,
-                proxied: true
-            )
+            // Never silently overwrite a CNAME pointing to a different target.
+            throw CloudflareError.conflictingDNSRecord(hostname: normalized, type: "CNAME")
         }
         if let conflict = existing.first {
             throw CloudflareError.conflictingDNSRecord(hostname: normalized, type: conflict.type)
@@ -481,6 +500,14 @@ struct CloudflareAPIClient: Sendable {
             throw CloudflareError.invalidResponse
         }
         return result
+    }
+
+    private func requestOptional<ResultType: Decodable>(
+        method: String,
+        path: String,
+        query: [String: String] = [:]
+    ) async throws -> ResultType? {
+        try await requestOptional(method: method, path: path, query: query, body: EmptyBody?.none)
     }
 
     private func requestOptional<ResultType: Decodable, Body: Encodable>(

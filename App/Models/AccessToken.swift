@@ -22,21 +22,73 @@ struct AccessToken: Codable, Identifiable, Hashable, Sendable {
     var lastUsedDevice: String?
     /// The device that first started a session with this secret.
     var boundDevice: BoundDevice?
+    /// Whether this token may be used on public routes (Tailscale Funnel or Cloudflare Tunnel).
+    /// Tailnet tokens default to `false` so they are never accepted on public routes even before binding.
+    var allowsPublicAccess: Bool = false
 
     struct BoundDevice: Codable, Hashable, Sendable {
         let stableID: String
         let name: String
     }
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, permissions, secretHash, createdAt, rolledAt, lastUsedAt, lastUsedDevice, boundDevice,
+            allowsPublicAccess
+    }
+
+    init(
+        id: UUID,
+        name: String,
+        permissions: ToolPermissions,
+        secretHash: Data,
+        createdAt: Date,
+        rolledAt: Date? = nil,
+        lastUsedAt: Date? = nil,
+        lastUsedDevice: String? = nil,
+        boundDevice: BoundDevice? = nil,
+        allowsPublicAccess: Bool = false
+    ) {
+        self.id = id
+        self.name = name
+        self.permissions = permissions
+        self.secretHash = secretHash
+        self.createdAt = createdAt
+        self.rolledAt = rolledAt
+        self.lastUsedAt = lastUsedAt
+        self.lastUsedDevice = lastUsedDevice
+        self.boundDevice = boundDevice
+        self.allowsPublicAccess = allowsPublicAccess
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        permissions = try container.decode(ToolPermissions.self, forKey: .permissions)
+        secretHash = try container.decode(Data.self, forKey: .secretHash)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        rolledAt = try container.decodeIfPresent(Date.self, forKey: .rolledAt)
+        lastUsedAt = try container.decodeIfPresent(Date.self, forKey: .lastUsedAt)
+        lastUsedDevice = try container.decodeIfPresent(String.self, forKey: .lastUsedDevice)
+        boundDevice = try container.decodeIfPresent(BoundDevice.self, forKey: .boundDevice)
+        allowsPublicAccess = try container.decodeIfPresent(Bool.self, forKey: .allowsPublicAccess) ?? false
+    }
+
     /// Creates a token and returns it with its secret.
-    static func make(name: String, permissions: ToolPermissions, now: Date = Date()) -> (AccessToken, String) {
+    static func make(
+        name: String,
+        permissions: ToolPermissions,
+        allowsPublicAccess: Bool = false,
+        now: Date = Date()
+    ) -> (AccessToken, String) {
         let secret = makeSecret()
         let token = AccessToken(
             id: UUID(),
             name: name,
             permissions: permissions,
             secretHash: hash(secret),
-            createdAt: now
+            createdAt: now,
+            allowsPublicAccess: allowsPublicAccess
         )
         return (token, secret)
     }

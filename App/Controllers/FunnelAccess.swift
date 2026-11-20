@@ -122,7 +122,7 @@ enum FunnelPolicy {
         now: Date = Date()
     ) -> Decision {
         if let token = bearerToken(in: authorizationField).flatMap(lookup) {
-            return token.boundDevice == nil ? .allowed(token) : .boundToDevice
+            return (token.allowsPublicAccess && token.boundDevice == nil) ? .allowed(token) : .boundToDevice
         }
         if let grant = bearerToken(in: authorizationField).flatMap(oauthLookup) {
             return .allowedOAuth(grant)
