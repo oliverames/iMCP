@@ -1,5 +1,19 @@
 # Worklog
 
+## 2026-11-20 - Finished #390 and #373, and ran the real-calendar pass
+
+**What changed**:
+
+- **#390** (`pr/apple-events-helper`): `beforeSending` is `@Sendable` and the `nonisolated(unsafe)` binding is gone; the task's cancellation is checked again after the hook returns, with a test that cancels while the hook is blocked and checks the script never runs. The earlier macOS 26 failure did not reproduce: a run with the test step un-quieted passed both the macOS 26 and macOS 27 jobs, so the failing test could not be named; the diagnostic was removed before the final push. The PR body says this.
+- **#373** (`pr/calendar-selection`): `CalendarSelectionStore` now fails closed when the stored value is not `Data` or decodes with none of the known keys (`{"calendars":42}`); only a missing key gets the first-run default. Update and delete now require the calendar of the occurrence that is actually changed, not only the first resolved event. Tests cover unknown-key, wrong-type, missing-key and corrupt-value cases.
+- **Real-calendar pass** on the #373 branch, on this Mac with real data: deselected **Oliver** in Settings → Calendar, then `calendars_list` (Oliver absent), `events_fetch` (no Oliver events in a day that had two), `events_create` / `events_update` / `events_delete` against Oliver (all refused with `notShared("Oliver")`), and `events_create` in a still-selected calendar (succeeded; the throwaway event was deleted and confirmed gone). The installed app was quit for the pass and relaunched after.
+
+**Decisions made**: The pass ran against a Debug build of the fork main with the #373 fixes cherry-picked (`f33ca6b`), signed with the fork's team, because the upstream-based PR branch cannot sign the Helper on this Mac.
+
+**Left off at**: #377, #378, #384, #390 and #373 are waiting on Mattt. #385 and #391 still have his findings, and the #385 signed sandboxed files pass is still to schedule.
+
+---
+
 ## 2026-11-20 - Sent #378 and #384 review fixes upstream
 
 **What changed**: Finished Mattt's pre-merge findings on #378 and #384, and rebased #384 onto the trimmed #377.
