@@ -99,6 +99,8 @@
 		A70000000000000000000040 /* AlarmMetadata.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70000000000000000000020 /* AlarmMetadata.swift */; };
 		AA0011000000000000000001 /* Envelope in Frameworks */ = {isa = PBXBuildFile; productRef = AA0011000000000000000002 /* Envelope */; };
 		AB0055000000000000000001 /* TSRP in Frameworks */ = {isa = PBXBuildFile; productRef = AB0055000000000000000002 /* TSRP */; };
+		D2E000000000000000000021 /* ../../App/Services/NotesInline.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E000000000000000000011 /* ../../App/Services/NotesInline.swift */; };
+		D2E000000000000000000030 /* TopoText in Frameworks */ = {isa = PBXBuildFile; productRef = D2E000000000000000000040 /* TopoText */; };
 		B0D1DEADBEEF000000000006 /* MCPServiceLoop.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1DEADBEEF000000000005 /* MCPServiceLoop.swift */; };
 		B0D1DEADBEEF000000000008 /* MCPServiceLoopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1DEADBEEF000000000007 /* MCPServiceLoopTests.swift */; };
 		B0D1DEADBEEF00000000000A /* MCPInitializeCompatibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0D1DEADBEEF000000000009 /* MCPInitializeCompatibility.swift */; };
@@ -180,6 +182,11 @@
 			proxyType = 1;
 			remoteGlobalIDString = A70000000000000000000002;
 			remoteInfo = "iMCP iOS Widgets";
+		};
+		D2E000000000000000000040 /* TopoText */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C0FFEE0000000000000000A3 /* XCRemoteSwiftPackageReference "TopoText" */;
+			productName = TopoText;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -307,6 +314,7 @@
 		E70399C0AD0A7EF1C0755801 /* MobileCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MobileCacheTests.swift; sourceTree = "<group>"; };
 		F8F44E6D2D59038D0075D79C /* iMCP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iMCP.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F8F44EB62D5908D00075D79C /* imcp-server */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "imcp-server"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2E000000000000000000011 /* ../../App/Services/NotesInline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Services/NotesInline.swift; sourceTree = "<group>"; };
 		D1E000000000000000000010 /* NotesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesTests.swift; sourceTree = "<group>"; };
 		B13B00000000000000000010 /* NotesSmartFolderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotesSmartFolderTests.swift; sourceTree = "<group>"; };
 		D1E000000000000000000011 /* ../../App/Services/NotesQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../../App/Services/NotesQuery.swift; sourceTree = "<group>"; };
@@ -469,6 +477,7 @@
 				A30000000000000000000031 /* JSONSchema in Frameworks */,
 				A30000000000000000000032 /* Ontology in Frameworks */,
 				A50000000000000000000030 /* Envelope in Frameworks */,
+				D2E000000000000000000030 /* TopoText in Frameworks */,
 				D1E000000000000000000030 /* TopoText in Frameworks */,
 				4D5347000000000000000030 /* iMessage in Frameworks */,
 				76F80A6E3EDBFB02048A6ED8 /* Cocoa.framework in Frameworks */,
@@ -645,6 +654,7 @@
 				D2E1A00000000000000000B3 /* ../../App/Services/RemindersPrivate.swift */,
 				A50000000000000000000010 /* MailTests.swift */,
 				A50000000000000000000011 /* ../../App/Services/Mail.swift */,
+				D2E000000000000000000011 /* ../../App/Services/NotesInline.swift */,
 				D1E000000000000000000010 /* NotesTests.swift */,
 				B13B00000000000000000010 /* NotesSmartFolderTests.swift */,
 				D1E000000000000000000011 /* ../../App/Services/NotesQuery.swift */,
@@ -755,6 +765,7 @@
 				A20000000000000000000012 /* Ontology */,
 				DCE061F8A68D0CD546D919E2 /* ServiceLifecycle */,
 				A50000000000000000000040 /* Envelope */,
+				D2E000000000000000000040 /* TopoText */,
 				D1E000000000000000000040 /* TopoText */,
 				4D5347000000000000000040 /* iMessage */,
 				1CD6B9E157EEC273F178543D /* ServiceLifecycleTestKit */,
@@ -1138,6 +1149,7 @@
 				B13B00000000000000000020 /* NotesSmartFolderTests.swift in Sources */,
 				D1E000000000000000000021 /* ../../App/Services/NotesQuery.swift in Sources */,
 				B13B00000000000000000041 /* ../../App/Services/NotesSmartFolders.swift in Sources */,
+				D2E000000000000000000021 /* ../../App/Services/NotesInline.swift in Sources */,
 				A50000000000000000000022 /* ../../App/Extensions/Foundation+Extensions.swift in Sources */,
 				4D5347000000000000000020 /* MessagesTests.swift in Sources */,
 				4D5347000000000000000021 /* ../../App/Services/Messages.swift in Sources */,
@@ -1224,6 +1236,8 @@
 				ENABLE_TESTING_SEARCH_PATHS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundlePackageType = BNDL;
+				MACOSX_DEPLOYMENT_TARGET = 15.1;
+				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				MACOSX_DEPLOYMENT_TARGET = 15.1;
 				PRODUCT_BUNDLE_IDENTIFIER = "me.mattt.iMCP.imcp-serverTests";
 				PRODUCT_MODULE_NAME = imcp_serverTests;
@@ -1846,6 +1860,7 @@
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
 				kind = upToNextMajorVersion;
+				minimumVersion = 0.3.0;
 				minimumVersion = 2.6.0;
 			};
 		};
