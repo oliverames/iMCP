@@ -1,5 +1,18 @@
 # Worklog
 
+## 2026-11-20 - Ran the TopoText validation and the signed sandboxed Files pass
+
+**What changed**:
+
+- **TopoText #4 validation** against my real Notes database, read-only, from Terminal with Full Disk Access: 433 notes across 30 folders, 430 decoded (3 locked), 189 in Recently Deleted. Every decoded note encodes back to exactly the bytes Notes stored (`lossless: encoding equals the stored bytes: 430`), every invariant the editor relies on holds (`invariants: notes with every invariant: 430`), and the trial edits are sound where they apply: append a checklist item 430, insert text in the first paragraph 430, change a checklist item's state 9, delete a character of the last paragraph 268 sound with 122 refused for an attachment range and 1 refused for splitting a character. The tool printed aggregate counts only. Posted to `mattt/TopoText#4`.
+- **#385 signed sandboxed pass** on a Debug build signed with the fork's team: added `~/Documents/imcp-files-pass` in Settings → Files → Add Folder; quit and relaunched the app (both shared folders stayed available, so the bookmarks persist); `files_list`, `files_read` (content matched byte for byte), `files_write` (created a file), and `files_trash` (the file went to the Trash and was still there, not deleted). Originals untouched. Test files and the test folder were removed afterwards, and the installed app was relaunched.
+
+**Decisions made**: The pass ran against fork main with the #385 fix cherry-picked (`8b76101`), signed with the fork's team, because the upstream-based PR branch cannot sign the Helper on this Mac. The code under test is the same as the PR head.
+
+**Left off at**: All seven PRs and TopoText #5 are waiting on Mattt. The two deferred passes are done.
+
+---
+
 ## 2026-11-20 - Finished the #385 and #391 code fixes
 
 **What changed**:
