@@ -622,7 +622,11 @@ final class RemindersService: Service {
                         "completed": .boolean(
                             description:
                                 "Completion state. Setting true records completion at the current time and advances recurring reminders; false clears the completion date."
-                        )
+                        ),
+                        "completion_date": .string(
+                            description:
+                                "When it was completed: YYYY-MM-DD or YYYY-MM-DD HH:MM. Only with completed true, and not for a repeating reminder."
+                        ),
                     ] as OrderedDictionary,
                     uniquingKeysWith: { _, new in new }
                 ),
@@ -658,7 +662,9 @@ final class RemindersService: Service {
             // an error, not a silent no-op.
             try Self.rejectUnknownKeys(
                 arguments,
-                allowed: Set(reminderProperties.keys).union(["identifier", "completed"])
+                allowed: Set(reminderProperties.keys).union([
+                    "identifier", "completed", "completion_date",
+                ])
             )
 
             guard
@@ -1273,6 +1279,14 @@ final class RemindersService: Service {
                 openWorldHint: false
             )
         ) { arguments in
+            // Completing is an update: respect the reminders_update switch
+            // before any reminder is fetched.
+            guard !RemindersQuery.isUpdateDisabled() else {
+                throw RemindersInputError(
+                    code: "tool_disabled",
+                    message: "Batch completion is unavailable while reminders_update is disabled."
+                )
+            }
             try await self.requireAccess()
             try Self.rejectUnknownKeys(
                 arguments,
@@ -1332,7 +1346,17 @@ final class RemindersService: Service {
                     // A repeating reminder advances instead of flipping, so
                     // its stored state cannot settle the question.
                     let stored = EKEventStore().calendarItem(withIdentifier: identifier) as? EKReminder
-                    if repeating || stored?.isCompleted == completed {
+                    if repeating {
+                        return .uncertain(error.localizedDescription)
+                    }
+                    guard let stored else {
+                        // The reminder is gone, so the write cannot be
+                        // confirmed either way. Report it and stop the batch.
+                        return .uncertain(
+                            "The reminder could not be read back after the write failed, so it may or may not have changed."
+                        )
+                    }
+                    if stored.isCompleted == completed {
                         return .uncertain(error.localizedDescription)
                     }
                     return .failed("write_failed", error.localizedDescription)
@@ -1463,6 +1487,15 @@ final class RemindersService: Service {
                 openWorldHint: false
             )
         ) { arguments in
+            // Renaming is gated by its own switch, before any list is read;
+            // a color change is not a rename.
+            let wantsRename = arguments["title"] != nil
+            if wantsRename, RemindersQuery.isListRenameDisabled() {
+                throw RemindersInputError(
+                    code: "tool_disabled",
+                    message: "Renaming a list is unavailable while reminders_lists_rename is disabled."
+                )
+            }
             try await self.requireAccess()
             try Self.rejectUnknownKeys(arguments, allowed: ["identifier", "name", "title", "color"])
             let list = try self.list(arguments)
@@ -1712,7 +1745,9 @@ final class RemindersService: Service {
                 "datetime": .string(iso8601String(date)),
             ])
         }
-        let minutes = Int((-alarm.relativeOffset / 60).rounded())
+        // A stored alarm can carry any offset. Convert without trapping: an
+        // offset too large for an Int is reported at the nearest bound.
+        let minutes = RemindersQuery.relativeAlarmMinutes(alarm.relativeOffset)
         return .object([
             "type": .string("relative"),
             "minutes": .int(minutes),

@@ -73,4 +73,48 @@ final class AppleScriptTests: XCTestCase {
             XCTAssertNotNil((error as? NSAppleScript.ExecutionError)?.number)
         }
     }
+
+    func testBeforeSendingRunsImmediatelyBeforeTheScript() async throws {
+        let marker = OSAllocatedUnfairLock(initialState: 0)
+        let result = try await NSAppleScript.execute("return 7") {
+            marker.withLock { $0 = 1 }
+        }
+        XCTAssertEqual(result.int32Value, 7)
+        XCTAssertEqual(marker.withLock { $0 }, 1)
+
+        struct Stop: Error {}
+        do {
+            _ = try await NSAppleScript.execute("error \"ran\" number 1") { throw Stop() }
+            XCTFail("expected the hook's error")
+        } catch {
+            XCTAssertTrue(error is Stop, "\(error)")
+        }
+    }
+
+    /// A task cancelled while the hook is running must not start the script.
+    func testCancellingDuringTheHookStopsTheScript() async throws {
+        let started = OSAllocatedUnfairLock(initialState: false)
+        let release = DispatchSemaphore(value: 0)
+        let task = Task {
+            try await NSAppleScript.execute("return 3") {
+                started.withLock { $0 = true }
+                release.wait()
+            }.int32Value
+        }
+        // Wait until the hook is inside the script queue, then cancel.
+        for _ in 0 ..< 1000 where !started.withLock({ $0 }) {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertTrue(started.withLock { $0 }, "the hook never ran")
+        task.cancel()
+        release.signal()
+        do {
+            _ = try await task.value
+            XCTFail("the script ran after the task was cancelled during the hook")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+    }
 }

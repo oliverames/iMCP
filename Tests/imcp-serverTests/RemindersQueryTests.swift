@@ -429,5 +429,81 @@ final class RemindersQueryTests: XCTestCase {
             forKey: "disabledTools"
         )
         XCTAssertTrue(RemindersQuery.isDeleteDisabled(defaults: defaults))
+        XCTAssertTrue(RemindersQuery.isUpdateDisabled(defaults: defaults) == false)
+    }
+
+    /// A stored relative alarm with an extreme offset must not trap.
+    func testRelativeAlarmMinutesClampsExtremeOffsets() {
+        XCTAssertEqual(RemindersQuery.relativeAlarmMinutes(-900), 15)
+        XCTAssertEqual(RemindersQuery.relativeAlarmMinutes(900), -15)
+        XCTAssertEqual(
+            RemindersQuery.relativeAlarmMinutes(-Double.greatestFiniteMagnitude),
+            Int.max
+        )
+        XCTAssertEqual(
+            RemindersQuery.relativeAlarmMinutes(Double.greatestFiniteMagnitude),
+            Int.min
+        )
+    }
+
+    /// An all-day due carries the calendar it was read in; a timed one keeps
+    /// its seconds.
+    func testDueComponentsCarryCalendarAndSeconds() throws {
+        let allDay = try RemindersQuery.parseDue("2026-05-27", calendar: calendar)
+        XCTAssertTrue(allDay.isAllDay)
+        XCTAssertNotNil(allDay.components.calendar, "an all-day due needs a calendar for EKReminder")
+        XCTAssertEqual(allDay.components.timeZone, calendar.timeZone)
+        XCTAssertNil(allDay.components.hour)
+
+        let timed = try RemindersQuery.parseDue("2026-05-27 09:30:45", calendar: calendar)
+        XCTAssertFalse(timed.isAllDay)
+        XCTAssertEqual(timed.components.second, 45, "a timed due keeps its seconds")
+    }
+
+    /// A view keeps the time zone stored with the due date instead of
+    /// re-reading the wall time in the Mac's zone.
+    func testViewKeepsTheStoredTimeZone() throws {
+        var stored = DateComponents(year: 2026, month: 5, day: 27, hour: 9, minute: 30)
+        stored.calendar = calendar
+        stored.timeZone = calendar.timeZone
+        let viewCalendar = Calendar(identifier: .gregorian)
+        let due = try XCTUnwrap(RemindersQuery.Views.dueDate(of: stored, calendar: viewCalendar))
+        XCTAssertEqual(due, try XCTUnwrap(calendar.date(from: stored)))
+    }
+
+    /// A house number is part of the street, and a bare locality is not a place.
+    func testAddressMatchingChecksHouseNumberAndRejectsBareLocality() {
+        let house = RemindersQuery.GeocodeCandidate(
+            name: nil,
+            thoroughfare: "Main St",
+            subThoroughfare: "123",
+            locality: "Springfield",
+            postalCode: nil,
+            administrativeArea: "IL",
+            country: "US",
+            latitude: 39.8,
+            longitude: -89.65,
+            radiusMeters: 50
+        )
+        XCTAssertNoThrow(
+            try RemindersQuery.judgeAddress(query: "123 Main St, Springfield", candidates: [house])
+        )
+        XCTAssertThrowsError(
+            try RemindersQuery.judgeAddress(query: "456 Main St, Springfield", candidates: [house])
+        )
+
+        let town = RemindersQuery.GeocodeCandidate(
+            name: "Rome",
+            thoroughfare: nil,
+            subThoroughfare: nil,
+            locality: "Rome",
+            postalCode: "00100",
+            administrativeArea: "RM",
+            country: "IT",
+            latitude: 41.9,
+            longitude: 12.5,
+            radiusMeters: 50
+        )
+        XCTAssertThrowsError(try RemindersQuery.judgeAddress(query: "Rome", candidates: [town]))
     }
 }

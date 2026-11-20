@@ -385,30 +385,6 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         ) { _ in
             try await self.statisticsResult()
         }
-
-        Tool(
-            name: "notes_tags",
-            description:
-                "List the tags (#hashtags) used in the Notes app, with how many notes carry each one, most used first. Reads the contents of the most recently edited notes, up to scanLimit, and says when it stopped before the oldest notes. Notes in Recently Deleted and locked notes are skipped.",
-            inputSchema: .object(
-                properties: [
-                    "scanLimit": .integer(
-                        description: "Most notes whose contents to read, most recently edited first",
-                        default: .int(Self.tagScanDefault),
-                        minimum: 1,
-                        maximum: Self.tagScanMaximum
-                    )
-                ],
-                additionalProperties: false
-            ),
-            annotations: .init(
-                title: "List Note Tags",
-                readOnlyHint: true,
-                openWorldHint: false
-            )
-        ) { arguments in
-            try await self.tagsResult(arguments)
-        }
     }
 
     private func smartFoldersResult() async throws -> Value {
@@ -635,49 +611,19 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
     }
 
     private func tagsResult(_ arguments: [String: Value]) async throws -> Value {
-        let limit = try self.argument("scanLimit", in: arguments, as: \.intValue) ?? Self.tagScanDefault
-        guard (1 ... Self.tagScanMaximum).contains(limit) else {
-            throw ArgumentError.invalid("scanLimit must be 1 through \(Self.tagScanMaximum)")
+        let includesDeleted = try argument("includeRecentlyDeleted", in: arguments, as: \.boolValue) ?? false
+        try checkDatabaseAccess()
+        let summaries = try await withStore { try await $0.tags(includingRecentlyDeleted: includesDeleted) }
+        let items: [Value] = summaries.map {
+            .object(["name": .string($0.tag.text), "numberOfItems": .int($0.noteCount)])
         }
-
-        try self.checkDatabaseAccess()
-        let (tally, scanned, isComplete) = try await self.withStore { store in
-            try await store.withSnapshot { snapshot in
-                var tally = TagTally()
-                var scanned = 0
-                var request = TopoText.Note.FetchRequest(limit: TopoText.Note.FetchRequest.maximumLimit)
-                while true {
-                    let result = try snapshot.search(request)
-                    for note in result.notes where !note.isLocked {
-                        guard scanned < limit else { return (tally, scanned, false) }
-                        scanned += 1
-                        // A note whose contents can't be decoded has no tags to count.
-                        if let content = try? snapshot.content(for: note.id) {
-                            tally.add(NoteTraits(content: content))
-                        }
-                    }
-                    guard let next = result.nextCursor else { return (tally, scanned, true) }
-                    request.cursor = next
-                }
-            }
-        }
-
-        var list: [String: Value] = [
+        return .object([
             "@context": "https://schema.org",
             "@type": "ItemList",
             "name": "Note Tags",
-            "numberOfItems": .int(tally.counts.count),
-            "itemListElement": .array(
-                tally.sorted.map { ["name": .string($0.tag), "numberOfItems": .int($0.count)] }
-            ),
-            "scannedNotes": .int(scanned),
-        ]
-        if !isComplete {
-            list["description"] = .string(
-                "Only the \(scanned) most recently edited notes were read, so older notes can have other tags. Raise scanLimit to read more."
-            )
-        }
-        return .object(list)
+            "numberOfItems": .int(summaries.count),
+            "itemListElement": .array(items),
+        ])
     }
 
     // MARK: - Arguments and Search
@@ -685,9 +631,10 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
     /// The most notes whose contents one `notes_fetch` call reads to apply a filter,
     /// which bounds the time of a call whose filters match few notes.
     private static let contentReadLimit = 500
+    /// The most notes one `notes_fetch` call scans to apply metadata filters,
+    /// bounding large stores. The budget counts every note the search examined,
+    /// including notes that matched no text query.
     private static let metadataScanLimit = 2_000
-    private static let tagScanDefault = 500
-    private static let tagScanMaximum = 5_000
 
     /// One page of notes, after the filters that TopoText can't apply.
     private struct NotesPage: Sendable {
@@ -711,9 +658,12 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
     /// so this asks for as many notes as the page still needs and filters them,
     /// until the page is full or the notes run out.
     /// Every page it asks for is examined to its end, so `nextCursor` skips no note.
+    /// The scan budget counts the notes the search examined, not the notes it
+    /// returned, so a text query with few matches cannot scan far past it.
     private static func search(
         _ request: TopoText.Note.FetchRequest,
         filter: NoteFilter,
+        scanLimit: Int = metadataScanLimit,
         in snapshot: TopoText.Store.Snapshot
     ) throws -> NotesPage {
         let wanted = request.limit
@@ -722,10 +672,24 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         var read = 0
         var scanned = 0
         while page.notes.count < wanted {
-            request.limit = wanted - page.notes.count
+            let remaining = scanLimit - scanned
+            guard remaining > 0 else {
+                page.stoppedEarly = .metadataScan
+                break
+            }
+            // Cap the page by what is left of the scan budget.
+            request.limit = min(wanted - page.notes.count, remaining)
             let result = try snapshot.search(request)
-            scanned += result.notes.count
-            let matchedByPreview = Set(result.unreadableNoteIDs)
+            scanned += result.scannedNoteCount
+            // Unreadable notes are reported whether or not they matched.
+            for id in result.unreadableNoteIDs where !page.unreadableNoteIDs.contains(id) {
+                page.unreadableNoteIDs.append(id)
+            }
+            // Tags come from the same records the note's `keywords` come from.
+            let ids = result.notes.map(\.id)
+            let tags =
+                filter.needsTags
+                ? (try readIfSupported { try snapshot.tags(for: ids) } ?? [:]) : [:]
             for note in result.notes {
                 guard
                     filter.matches(
@@ -734,9 +698,10 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                         creationDate: note.creationDate
                     )
                 else { continue }
+                guard filter.matches(tags: tags[note.id] ?? []) else { continue }
                 guard filter.needsContents else {
                     page.notes.append(note)
-                    if matchedByPreview.contains(note.id) {
+                    if result.unreadableNoteIDs.contains(note.id) {
                         page.unreadableNoteIDs.append(note.id)
                     }
                     continue
@@ -760,7 +725,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                     page.stoppedEarly = .contentRead
                     break
                 }
-                if scanned >= metadataScanLimit {
+                if scanned >= scanLimit {
                     page.stoppedEarly = .metadataScan
                     break
                 }
