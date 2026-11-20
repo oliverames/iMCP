@@ -163,6 +163,47 @@ final class OutboundConfirmationTests: XCTestCase {
         }
     }
 
+    func testTheActionDoesNotRunWhenTheCallerIsCancelledBeforeApprovalReturns() async {
+        // The caller is cancelled while the confirmation is still being decided.
+        // Even though the answer is approved, the action must not run.
+        let counter = OSAllocatedCounter()
+        let confirmer = SlowConfirmer(answer: .approved, delay: .milliseconds(200))
+        let task = Task {
+            try await confirmer.approve(request) {
+                counter.increment()
+                return "sent"
+            }
+        }
+        // Cancel while confirm is still waiting.
+        try? await Task.sleep(for: .milliseconds(20))
+        task.cancel()
+        do {
+            _ = try await task.value
+            XCTFail("ran after cancellation")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("unexpected error: \(error)")
+        }
+        XCTAssertEqual(counter.value, 0, "a cancelled call must not send")
+    }
+
+    /// A confirmer that waits, cancellation-aware, then answers.
+    private actor SlowConfirmer: OutboundConfirming {
+        let answer: OutboundConfirmationAnswer
+        let delay: Duration
+
+        init(answer: OutboundConfirmationAnswer, delay: Duration) {
+            self.answer = answer
+            self.delay = delay
+        }
+
+        func confirm(_ request: OutboundConfirmationRequest) async -> OutboundConfirmationAnswer {
+            try? await Task.sleep(for: delay)
+            return answer
+        }
+    }
+
     @MainActor
     private func settle(until condition: () -> Bool) async {
         for _ in 0 ..< 200 where !condition() {
