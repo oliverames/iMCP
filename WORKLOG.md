@@ -1,5 +1,19 @@
 # Worklog
 
+## 2026-11-20 - Sent #378 and #384 review fixes upstream
+
+**What changed**: Finished Mattt's pre-merge findings on #378 and #384, and rebased #384 onto the trimmed #377.
+
+- **#378** (`pr/reminders`): The branch was already EventKit-only, so no private commit needed dropping; the body now says so. Fixed all seven findings: stored relative alarms clamp instead of trapping; all-day and timed dues carry the reminder's calendar and time zone and timed dues keep seconds; views read a due date in its stored zone; a location alarm's house number is part of the street match and a bare locality is rejected; `reminders_complete` is gated by `reminders_update` and a list rename by `reminders_lists_rename`, both before EventKit is touched; a complete with no reminder on readback is uncertain and stops the batch; `reminders_update` accepts `completion_date`; the batch-delete test drives the tool itself. The test target now compiles `Reminders.swift` plus the two extension files it needs, so the tool-level tests exercise the real handlers. 215 tests, 1 skipped, 0 failures.
+- **#384** (`pr/notes-v2`, force-pushed to `pr/notes`): Rebased onto the trimmed #377 and fixed the four findings. The scan budget counts `scannedNoteCount` and the page request is capped by the remaining budget; unreadable notes are reported whether or not they matched; tag filters read the same database tag records as `keywords`, inside `notes_fetch`'s snapshot; `keywords` is no longer overwritten by tags parsed from note text; the Markdown table converter no longer pads short rows; `TagTally` and its test are gone. The PR is read filters plus create only; the private NotesShared and edit tools stay on the fork. 251 tests, 1 skipped, 0 failures.
+- **Standing rule**: `AGENTS.md` now records that NotesShared and ReminderKit private APIs are for the fork only and never go upstream.
+
+**Decisions made**: The app scheme cannot be built from these upstream-based branches on this Mac because the `iMCP Helper` target uses Mattt's team for signing and there is no profile for it. The test target compiles the changed service files, so the code is type-checked, and the app build is left to CI; both PR bodies say so under "Not verified".
+
+**Left off at**: #377, #378 and #384 are mergeable and waiting on Mattt's re-review. #373, #385, #390 and #391 still have his findings; the two manual passes (#373 real calendars, #385 signed sandboxed files) still need Oliver's Mac.
+
+---
+
 ## 2026-11-20 - Synced fork main with upstream and reworked #377 for Mattt's review
 
 **What changed**: Merged `upstream/main` into fork main (`612e935`): #351 Notes smart folders/tags/links, #358 search limits, #382 alert wording. Resolved the structural conflicts by keeping upstream's snapshot-based Notes base with the fork's filters layered on, keeping the fork's `NotesSmartFolders.swift` and dropping upstream's duplicate `NotesInlineTests.swift`, and keeping both sides of the project file. Then cut #377 down to the two commits Mattt asked for (`pr/allow-writes-and-approvals`, force-pushed): Allow writes with its tests, README and test-target entries in the first commit, and the shared confirmation window in the second. Added `Task.checkCancellation()` before `perform` in `approve` with a test that cancels the caller while the confirmation is still being decided (`65f1a62`, also on fork main). #377 is `MERGEABLE` again.
