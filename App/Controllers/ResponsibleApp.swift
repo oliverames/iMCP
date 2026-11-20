@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OSLog
 import Security
@@ -95,12 +96,63 @@ struct ResponsibleApp: Equatable, Sendable {
         }
     }
 
+    /// Process names of interactive/scripting shells. If any intermediate ancestor between
+    /// `imcp-server` and its responsible app is a shell, trusting the app's signature would
+    /// trust arbitrary shell commands run inside it.
+    static let shellProcessNames: Set<String> = [
+        "sh", "bash", "zsh", "fish", "csh", "tcsh", "dash", "ksh", "osascript",
+    ]
+
+    /// Verifies that `ancestor` is in `child`'s actual parent-process chain and that no
+    /// intermediate process between them is a shell. This ensures the responsible app is
+    /// genuinely an ancestor of the process holding `imcp-server`'s stdio.
+    static func isDirectAncestorWithoutShell(
+        child: pid_t,
+        ancestor: pid_t,
+        parentAndName: (pid_t) -> (ppid: pid_t, name: String)? = processParentAndName
+    ) -> Bool {
+        guard child > 0, ancestor > 0 else { return false }
+        if child == ancestor { return true }
+        var current = child
+        var seen = Set<pid_t>([child])
+        for _ in 0 ..< 32 {
+            guard let info = parentAndName(current) else { return false }
+            let parent = info.ppid
+            if parent == ancestor { return true }
+            if parent <= 1 || !seen.insert(parent).inserted { return false }
+            if let parentInfo = parentAndName(parent),
+                shellProcessNames.contains(parentInfo.name.lowercased())
+            {
+                return false
+            }
+            current = parent
+        }
+        return false
+    }
+
+    private static func processParentAndName(_ pid: pid_t) -> (ppid: pid_t, name: String)? {
+        var bsd = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.stride)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &bsd, size) == size else { return nil }
+        let name = withUnsafeBytes(of: bsd.pbi_name) { raw -> String in
+            let bytes = raw.prefix { $0 != 0 }
+            return String(decoding: bytes, as: UTF8.self)
+        }
+        return (pid_t(bsd.pbi_ppid), name)
+    }
+
     // MARK: - Resolving
 
     /// Returns the app responsible for process `pid`, or `nil` if there is none to identify.
     static func resolve(responsibleFor pid: pid_t) -> ResponsibleApp? {
         var responsible = responsibility_get_pid_responsible_for_pid(pid)
         if responsible <= 0 { responsible = pid }
+        guard isDirectAncestorWithoutShell(child: pid, ancestor: responsible) else {
+            Logger.server.notice(
+                "Responsible process \(responsible) is not a direct non-shell ancestor of \(pid)"
+            )
+            return nil
+        }
         let attributes: [CFString: Any] = [
             kSecGuestAttributePid: responsible,
             kSecGuestAttributeDynamicCode: true,

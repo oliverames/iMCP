@@ -422,6 +422,8 @@ final class ClientCredentialStore {
         var wasTrustedByName: Bool
         /// The app responsible for the connecting `imcp-server`, read from its code signature.
         var app: ResponsibleApp? = nil
+        /// Whether `credential` came from `imcp-server`'s legacy shared fallback file.
+        var isAutomaticCredential: Bool = false
 
         /// How the person can trust this client so that it stops asking.
         enum TrustOffer: Equatable {
@@ -440,7 +442,8 @@ final class ClientCredentialStore {
 
         /// The identifier of the well-formed credential that the connection presented, if any.
         var credentialID: String? {
-            record?.id ?? credential.flatMap(ClientCredential.identifier(for:))
+            guard !isAutomaticCredential else { return nil }
+            return record?.id ?? credential.flatMap(ClientCredential.identifier(for:))
         }
 
         var offer: TrustOffer? {
@@ -518,11 +521,12 @@ final class ClientCredentialStore {
         let record = record(for: credential)
         let request = Request(
             claimedName: claimedName,
-            credential: credential,
-            record: record,
-            hasUnrecognizedCredential: credential != nil && record == nil,
+            credential: isAutomaticCredential ? nil : credential,
+            record: isAutomaticCredential ? nil : record,
+            hasUnrecognizedCredential: !isAutomaticCredential && credential != nil && record == nil,
             wasTrustedByName: legacyTrustedNames.contains(claimedName),
-            app: app
+            app: app,
+            isAutomaticCredential: isAutomaticCredential
         )
         if request.offer == .signature {
             if let app, let trusted = trustedAppRecord(matching: app) {
@@ -535,7 +539,7 @@ final class ClientCredentialStore {
             }
             return .ask(request)
         }
-        if let record, record.isTrusted {
+        if !isAutomaticCredential, let record, record.isTrusted {
             return .approve(record)
         }
         return .ask(request)

@@ -24,14 +24,9 @@ actor MCPService: Service {
 
                 let sessionError: (any Swift.Error)?
                 do {
-                    // Send the client's credential only to an app that passed the check.
-                    let hello: LocalSocketHello
-                    do {
-                        hello = try LocalSocketHello.resolved(environment: ProcessInfo.processInfo.environment)
-                    } catch {
-                        await log.warning("Failed to load or create persistent client credential: \(error)")
-                        hello = LocalSocketHello.fromEnvironment(ProcessInfo.processInfo.environment)
-                    }
+                    // Send only an explicit per-client credential so unconfigured clients
+                    // never share one fallback credential on disk.
+                    let hello = LocalSocketHello.fromEnvironment(ProcessInfo.processInfo.environment)
                     try await proxy.start(hello: hello.encoded())
                     sessionError = nil
                 } catch {

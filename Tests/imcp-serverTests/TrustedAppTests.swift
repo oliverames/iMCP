@@ -110,7 +110,9 @@ final class TrustedAppTests: XCTestCase {
         else {
             return XCTFail("A terminal should ask")
         }
-        XCTAssertEqual(request.offer, .credential)
+        // An automatic fallback credential is never offered for trust, and a terminal
+        // can't be trusted by signature, so there is no offer at all.
+        XCTAssertNil(request.offer)
         XCTAssertNil(request.signatureKey)
 
         guard case .ask(let withoutCredential) = store.evaluate(credential: nil, claimedName: "some-cli", app: terminal)
@@ -149,13 +151,13 @@ final class TrustedAppTests: XCTestCase {
 
         let credential = ClientCredential.generate()
         // Claude Code can run inside a trusted editor's terminal.
-        // The editor's trust must not approve it, and it's offered credential trust, not signature trust.
+        // The editor's trust must not approve it; only an explicit per-client credential is offered.
         guard
             case .ask(let request) = store.evaluate(
                 credential: credential,
                 claimedName: "claude-code",
                 app: calculator,
-                isAutomaticCredential: true
+                isAutomaticCredential: false
             )
         else { return XCTFail("A client claiming to be Claude Code should ask") }
         XCTAssertEqual(request.offer, .credential)
@@ -166,18 +168,18 @@ final class TrustedAppTests: XCTestCase {
                 credential: credential,
                 claimedName: "claude-code",
                 app: calculator,
-                isAutomaticCredential: true
+                isAutomaticCredential: false
             )
-        else { return XCTFail("Subsequent connections with the trusted credential should approve") }
+        else { return XCTFail("Subsequent connections with the explicit trusted credential should approve") }
     }
 
-    func testTrustedAutomaticCredentialDoesNotApproveTrustableApp() throws {
+    func testAutomaticFallbackCredentialIsNeverOfferedOrSharedAcrossUnconfiguredClients() throws {
         let store = makeStore()
         let terminal = try app(at: terminalURL)
         let calculator = try app(at: calculatorURL)
         let automaticCredential = ClientCredential.generate()
 
-        // Trust the CLI's automatic fallback credential from Terminal.
+        // An automatic fallback credential is ignored so unconfigured clients never share trust.
         guard
             case .ask(let cliRequest) = store.evaluate(
                 credential: automaticCredential,
@@ -185,11 +187,11 @@ final class TrustedAppTests: XCTestCase {
                 app: terminal,
                 isAutomaticCredential: true
             )
-        else { return XCTFail("First CLI connection should ask") }
-        _ = try store.alwaysTrust(cliRequest)
+        else { return XCTFail("Unconfigured CLI connection should ask") }
+        XCTAssertNil(cliRequest.offer)
+        XCTAssertNil(cliRequest.credentialID)
 
-        // A signature-trustable app without an explicit env credential must not silently
-        // inherit the CLI fallback credential; it must ask and offer signature trust.
+        // A signature-trustable app still gets signature trust and ignores automatic credentials.
         guard
             case .ask(let appRequest) = store.evaluate(
                 credential: automaticCredential,
@@ -197,18 +199,33 @@ final class TrustedAppTests: XCTestCase {
                 app: calculator,
                 isAutomaticCredential: true
             )
-        else { return XCTFail("A signature-trustable app must not inherit the automatic CLI credential") }
+        else { return XCTFail("A signature-trustable app must ask on first connection") }
         XCTAssertEqual(appRequest.offer, .signature)
+    }
 
-        // An explicit environment credential (e.g. from legacy settings) still approves.
-        guard
-            case .approve = store.evaluate(
-                credential: automaticCredential,
-                claimedName: "Calculator",
-                app: calculator,
-                isAutomaticCredential: false
-            )
-        else { return XCTFail("An explicit trusted environment credential should approve") }
+    func testResponsibleAppAncestryRejectsNonAncestorsAndShells() {
+        let directTree: [pid_t: (ppid: pid_t, name: String)] = [
+            300: (200, "imcp-server"),
+            200: (100, "Electron Helper"),
+            100: (1, "Claude"),
+        ]
+        XCTAssertTrue(
+            ResponsibleApp.isDirectAncestorWithoutShell(child: 300, ancestor: 100) { directTree[$0] }
+        )
+        // Unrelated responsible process not in the stdio parent chain.
+        XCTAssertFalse(
+            ResponsibleApp.isDirectAncestorWithoutShell(child: 300, ancestor: 999) { directTree[$0] }
+        )
+
+        let shellTree: [pid_t: (ppid: pid_t, name: String)] = [
+            300: (250, "imcp-server"),
+            250: (200, "zsh"),
+            200: (100, "Code Helper"),
+            100: (1, "Cursor"),
+        ]
+        XCTAssertFalse(
+            ResponsibleApp.isDirectAncestorWithoutShell(child: 300, ancestor: 100) { shellTree[$0] }
+        )
     }
 
     // MARK: - Claude Code settings
