@@ -1,5 +1,5 @@
 {
-  "originHash" : "72f3048571502b62f4b66f7cbb2f8dd9ecbf531e38c9030d7fb68ce803a8f438",
+  "originHash" : "b8420cc963d813529f26390ccdba9f919f2472c7e57c56b964600084c4dd4689",
   "pins" : [
     {
       "identity" : "envelope",
@@ -139,10 +139,10 @@
     {
       "identity" : "topotext",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/oliverames/TopoText",
+      "location" : "https://github.com/mattt/TopoText",
       "state" : {
-        "branch" : "feat/smart-folders-tags-links",
-        "revision" : "fc4ff6baaf6100082d7c169e82362f94e51cfb7c"
+        "revision" : "7b0486392636583c714242ad3652f216a3a0c37e",
+        "version" : "0.3.0"
       }
     },
     {
