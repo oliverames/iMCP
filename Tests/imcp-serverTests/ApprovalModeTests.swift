@@ -149,8 +149,9 @@ final class ApprovalModeTests: XCTestCase {
 
     // MARK: - Model & Persistence
 
-    func testDefaultsToAskWritesOnlyAndPersistsSelection() throws {
-        XCTAssertEqual(ApprovalMode.current(defaults: defaults), .askWritesOnly)
+    func testDefaultsToAllowEverythingAndPersistsSelection() throws {
+        // An unattended Mac gets no prompts unless the person chooses a mode that asks.
+        XCTAssertEqual(ApprovalMode.current(defaults: defaults), .allowEverything)
 
         for mode in ApprovalMode.allCases {
             ApprovalMode.setCurrent(mode, defaults: defaults)
@@ -162,7 +163,7 @@ final class ApprovalModeTests: XCTestCase {
         }
 
         defaults.set("unexpectedMode", forKey: ApprovalMode.defaultsKey)
-        XCTAssertEqual(ApprovalMode.current(defaults: defaults), .askWritesOnly)
+        XCTAssertEqual(ApprovalMode.current(defaults: defaults), .allowEverything)
     }
 
     func testModeClassificationAndDisplayTitles() {
@@ -334,22 +335,49 @@ final class ApprovalModeTests: XCTestCase {
 
     // MARK: - Modes 3 & 4: Agent-Managed and Allow Everything
 
-    func testFullAccessModesAllowWritesAndSkipConfirmationPopups() async throws {
+    func testFullAccessModesRespectServiceWriteSwitchesAndSkipConfirmationPopups() async throws {
+        // Full-access modes never prompt, but they no longer override a service's
+        // Allow writes switch: writes stay refused while the switch is off.
         for mode in [ApprovalMode.agentManaged, .allowEverything] {
-            let service = FakeService(writesEnabledByDefault: false)
-            ServiceWrites.setEnabled(false, serviceID: service.serviceID, defaults: defaults)
             ApprovalMode.setCurrent(mode, defaults: defaults)
 
-            XCTAssertTrue(service.areWritesEnabled(defaults: defaults))
+            let disabledService = FakeService(writesEnabledByDefault: false)
+            ServiceWrites.setEnabled(false, serviceID: disabledService.serviceID, defaults: defaults)
+            XCTAssertFalse(disabledService.areWritesEnabled(defaults: defaults))
             XCTAssertEqual(
-                Set(service.listedTools(defaults: defaults).map(\.name)),
-                ["fake_read", "fake_write", "fake_unmarked"]
+                Set(disabledService.listedTools(defaults: defaults).map(\.name)),
+                ["fake_read"]
             )
 
+            let promptingConfirmer = RecordingConfirmer(.approved)
+            do {
+                _ = try await ToolCallApproval.execute(
+                    tool: disabledService.tool(named: "fake_write"),
+                    in: disabledService,
+                    serviceName: "Fake",
+                    arguments: [:],
+                    clientName: "Duet",
+                    defaults: defaults,
+                    confirmer: promptingConfirmer,
+                    queue: ToolConfirmationQueue()
+                )
+                XCTFail("Expected WritesDisabledError for \(mode)")
+            } catch {
+                XCTAssertEqual(
+                    error as? WritesDisabledError,
+                    WritesDisabledError(tool: "fake_write")
+                )
+            }
+            XCTAssertTrue(promptingConfirmer.requests.isEmpty)
+            XCTAssertEqual(disabledService.writeCounter.value, 0)
+
+            // With the service's Allow writes switch on, reads and writes run with no prompt.
+            defaults.removeObject(forKey: ServiceWrites.settingKey(forService: disabledService.serviceID))
+            let enabledService = FakeService(writesEnabledByDefault: true)
             let confirmer = RecordingConfirmer(.declined)
             let readResult = try await ToolCallApproval.execute(
-                tool: service.tool(named: "fake_read"),
-                in: service,
+                tool: enabledService.tool(named: "fake_read"),
+                in: enabledService,
                 serviceName: "Fake",
                 arguments: [:],
                 clientName: "Duet",
@@ -358,8 +386,8 @@ final class ApprovalModeTests: XCTestCase {
                 queue: ToolConfirmationQueue()
             )
             let writeResult = try await ToolCallApproval.execute(
-                tool: service.tool(named: "fake_write"),
-                in: service,
+                tool: enabledService.tool(named: "fake_write"),
+                in: enabledService,
                 serviceName: "Fake",
                 arguments: [:],
                 clientName: "Duet",
@@ -383,11 +411,6 @@ final class ApprovalModeTests: XCTestCase {
                 XCTAssertFalse(mode.skipsConfirmationPopups)
             }
         }
-
-        // Switching back to a prompting mode preserves the stored per-service toggle state.
-        ApprovalMode.setCurrent(.askWritesOnly, defaults: defaults)
-        let service = FakeService(writesEnabledByDefault: false)
-        XCTAssertFalse(service.areWritesEnabled(defaults: defaults))
     }
 
     // MARK: - Messages Double-Prompt Prevention

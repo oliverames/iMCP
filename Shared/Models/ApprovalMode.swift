@@ -12,7 +12,7 @@ enum ApprovalMode: String, Codable, CaseIterable, Identifiable, Sendable {
     /// Grants full read and write access in iMCP without individual approvals.
     case allowEverything
 
-    static let defaultMode: ApprovalMode = .askWritesOnly
+    static let defaultMode: ApprovalMode = .allowEverything
     static let defaultsKey = "approvalMode"
 
     var id: String { rawValue }
@@ -54,13 +54,9 @@ enum ApprovalMode: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     /// Whether iMCP allows write tools across enabled services regardless of per-service Allow writes switches.
+    /// Always `false` so per-service Allow writes switches remain authoritative.
     var bypassesServiceWriteToggles: Bool {
-        switch self {
-        case .askEverything, .askWritesOnly:
-            false
-        case .agentManaged, .allowEverything:
-            true
-        }
+        false
     }
 
     /// Whether Settings shows client-side configuration instructions for this mode.
