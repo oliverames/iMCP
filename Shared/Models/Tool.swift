@@ -81,6 +81,4 @@ public struct JSONLDGraph<Element: Encodable>: Encodable {
 enum ToolCallContext {
     /// The client name from its initialize request, if available.
     @TaskLocal static var clientName: String?
-    /// True when the central approval gate already confirmed this tool call.
-    @TaskLocal static var alreadyConfirmedByGlobalGate: Bool = false
 }

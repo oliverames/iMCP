@@ -119,8 +119,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
     /// The asset catalog image, or nil for an app that uses a symbol.
     let logoAsset: String?
     let symbol: String
-    /// The id of this app's entry in ``ApprovalMode/agentInstructions``.
-    let instructionID: String
     /// Short steps for connecting.
     let steps: String
     /// Lowercased fragments that identify the app by the name it reports.
@@ -132,7 +130,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         kind: .onThisMac,
         logoAsset: "ConnectorClaude",
         symbol: "bubble.left.fill",
-        instructionID: "claude-desktop",
         steps: "Press Set Up. iMCP adds itself to Claude Desktop.",
         aliases: ["claude desktop"]
     )
@@ -142,7 +139,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         kind: .onThisMac,
         logoAsset: "ConnectorClaudeCode",
         symbol: "terminal",
-        instructionID: "claude-code",
         steps: "Press Set Up. iMCP adds itself to Claude Code.",
         aliases: ["claude code", "claude-code"]
     )
@@ -152,7 +148,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         kind: .cloud,
         logoAsset: "ConnectorClaude",
         symbol: "bubble.left.fill",
-        instructionID: "claude-ai",
         steps:
             "In Claude Web (claude.ai), open Settings, then Connectors, then Add custom connector. Paste the address.",
         aliases: ["claude web", "claude.ai", "claude"]
@@ -163,7 +158,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         kind: .cloud,
         logoAsset: "ConnectorClaudeDuet",
         symbol: "bubble.left.and.bubble.right.fill",
-        instructionID: "duet",
         steps: "Add a custom connector in Claude Duet and paste the address. Approve once in iMCP.",
         aliases: ["duet"]
     )
@@ -173,7 +167,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         kind: .cloud,
         logoAsset: "ConnectorMuse",
         symbol: "sparkles",
-        instructionID: "muse",
         steps: "Add a connector in Muse and paste the address. Sign in when it asks.",
         aliases: ["muse"]
     )
@@ -183,7 +176,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         kind: .cloud,
         logoAsset: "ConnectorGemini",
         symbol: "sparkle",
-        instructionID: "gemini",
         steps: "Add a custom connector in Gemini and paste the address. Approve once in iMCP.",
         aliases: ["gemini"]
     )
@@ -197,18 +189,6 @@ struct KnownClient: Identifiable, Equatable, Sendable {
         let lowered = name.lowercased()
         let order: [KnownClient] = [.claudeDuet, .muse, .gemini, .claudeCode, .claudeDesktop, .claudeAI]
         return order.first { client in client.aliases.contains { lowered.contains($0) } }
-    }
-}
-
-extension ApprovalMode {
-    /// One short line for the chosen mode, shown under the picker.
-    var settingsCaption: String {
-        switch self {
-        case .askEverything: "Every request asks first."
-        case .askWritesOnly: "Changes ask first. Reading is automatic."
-        case .agentManaged: "Your AI app asks. iMCP allows everything."
-        case .allowEverything: "Nothing asks. Use with care."
-        }
     }
 }
 

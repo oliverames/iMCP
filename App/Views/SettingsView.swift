@@ -143,21 +143,20 @@ struct GeneralSettingsView: View {
             }
 
             Section {
-                Picker(
-                    selection: Binding(
-                        get: { serverController.approvalMode },
-                        set: { serverController.approvalMode = $0 }
+                Toggle(
+                    isOn: Binding(
+                        get: { Unattended.isEnabled() },
+                        set: { Unattended.setEnabled($0) }
                     )
                 ) {
-                    ForEach(ApprovalMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                } label: {
-                    RowLabel(title: "Ask before", subtitle: serverController.approvalMode.settingsCaption) {
+                    RowLabel(
+                        title: "Unattended",
+                        subtitle:
+                            "When on, iMCP approves its own confirmations without showing a window, so a headless Mac never blocks. Per-service Allow writes switches still decide what clients may change."
+                    ) {
                         SettingsIcon(symbol: "hand.raised.fill", color: .purple)
                     }
                 }
-                .pickerStyle(.menu)
             } header: {
                 Text("Approvals")
             }

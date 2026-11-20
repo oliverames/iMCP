@@ -1443,15 +1443,6 @@ extension MessageService {
         locate: (SendRequest, Int64) async -> OutgoingMessage?,
         inFlight: InFlightSends = .shared
     ) async throws -> [String: Value] {
-        if ToolCallContext.alreadyConfirmedByGlobalGate {
-            return try await deliverAndLocate(
-                request,
-                identity: identity,
-                deliver: deliver,
-                locate: locate,
-                inFlight: inFlight
-            )
-        }
         return try await confirmer.approve(confirmation) {
             try await deliverAndLocate(
                 request,

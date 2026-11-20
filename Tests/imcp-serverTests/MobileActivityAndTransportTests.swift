@@ -542,7 +542,7 @@ final class MobileActivityAndTransportTests: XCTestCase {
         if DevBootstrap.isConfigured {
             XCTAssertEqual(defaults.string(forKey: "cloudflareTunnelHostname"), DevBootstrap.cloudflareHostname)
             XCTAssertEqual(defaults.string(forKey: MobileService.cloudflareURLKey), DevBootstrap.cloudflareMobileURL)
-            XCTAssertEqual(ApprovalMode.current(defaults: defaults), .agentManaged)
+            XCTAssertTrue(Unattended.isEnabled(defaults: defaults))
             if let certData = DevBootstrap.cloudflareCertData {
                 XCTAssertTrue(FileManager.default.fileExists(atPath: certURL.path))
                 XCTAssertNoThrow(try CloudflareAccount.parseCertPEM(data: certData))

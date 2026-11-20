@@ -356,20 +356,9 @@ final class ServerController: ObservableObject {
     /// so that revoking a credential closes them.
     private var credentialSessions = CredentialSessions()
 
-    // MARK: - AppStorage for Disabled Tools & Approval Mode
+    // MARK: - AppStorage for Disabled Tools
     @AppStorage("disabledTools") private var disabledToolsData = Data()
     private var disabledToolsGeneration = 0
-    @AppStorage(ApprovalMode.defaultsKey) private var approvalModeRawValue = ApprovalMode.defaultMode.rawValue
-
-    var approvalMode: ApprovalMode {
-        get { ApprovalMode(rawValue: approvalModeRawValue) ?? .defaultMode }
-        set {
-            guard approvalMode != newValue else { return }
-            objectWillChange.send()
-            approvalModeRawValue = newValue.rawValue
-            toolListChanged()
-        }
-    }
 
     // MARK: - Remote Access
     @AppStorage("remoteAccessEnabled") private var remoteAccessEnabled = false
@@ -1578,8 +1567,6 @@ actor ServerNetworkManager {
     private var serviceBindings: [String: Binding<Bool>] = [:]
     private var disabledTools: Set<String> = []
     private var disabledToolsLastGeneration = -1
-    private let confirmer: any OutboundConfirming = MacOutboundConfirmer()
-    private let confirmationQueue = ToolConfirmationQueue.shared
 
     private var remoteAccessIfStarted: RemoteAccessServer?
     /// The HTTP server for clients on other devices, created when first needed.
@@ -2038,9 +2025,6 @@ actor ServerNetworkManager {
                 }
             }
 
-            let confirmer = self.confirmer
-            let confirmationQueue = self.confirmationQueue
-
             for service in services {
                 let serviceId = String(describing: type(of: service))
                 let serviceName = Self.serviceDisplayName(service)
@@ -2058,11 +2042,8 @@ actor ServerNetworkManager {
                         let value = try await ToolCallApproval.execute(
                             tool: tool,
                             in: service,
-                            serviceName: serviceName,
                             arguments: params.arguments ?? [:],
-                            clientName: resolvedClient,
-                            confirmer: confirmer,
-                            queue: confirmationQueue
+                            clientName: resolvedClient
                         )
 
                         log.notice("Tool \(params.name) executed successfully for \(connectionID)")

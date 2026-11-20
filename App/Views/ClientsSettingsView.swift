@@ -102,8 +102,6 @@ struct ClientsSettingsView: View {
     // MARK: Rows
 
     private func clientRow(_ client: KnownClient, publicURL: String?) -> some View {
-        let mode = serverController.approvalMode
-        let instruction = mode.agentInstructions.first { $0.id == client.instructionID }
         return ExpandableRow(isExpanded: expansion(of: client.id)) {
             HStack(spacing: 10) {
                 ClientLogo(client: client)
@@ -117,20 +115,6 @@ struct ClientsSettingsView: View {
         } content: {
             VStack(alignment: .leading, spacing: 8) {
                 Text(client.steps)
-                if let instruction {
-                    Text(instruction.instructions)
-                        .foregroundStyle(.secondary)
-                    if let snippet = instruction.codeSnippet {
-                        HStack(alignment: .top) {
-                            Text(snippet)
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
-                            Spacer()
-                            Button("Copy") { copyToSettingsPasteboard(snippet) }
-                                .controlSize(.small)
-                        }
-                    }
-                }
             }
             .font(.callout)
             .padding(.vertical, 4)

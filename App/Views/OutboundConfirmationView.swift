@@ -173,7 +173,7 @@ struct MacOutboundConfirmer: OutboundConfirming {
 
     func confirm(_ request: OutboundConfirmationRequest) async -> OutboundConfirmationAnswer {
         let defaults = defaultsSuiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
-        if ApprovalMode.current(defaults: defaults).skipsConfirmationPopups {
+        if Unattended.isEnabled(defaults: defaults) {
             return .approved
         }
         return await OutboundConfirmation.ask { onAnswer in

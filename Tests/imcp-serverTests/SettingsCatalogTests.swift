@@ -52,11 +52,4 @@ final class SettingsCatalogTests: XCTestCase {
         XCTAssertEqual(KnownClient.gemini.logoAsset, "ConnectorGemini")
         XCTAssertEqual(KnownClient.claudeCode.logoAsset, "ConnectorClaudeCode")
     }
-
-    func testEveryApprovalModeHasAShortCaption() {
-        for mode in ApprovalMode.allCases {
-            XCTAssertFalse(mode.settingsCaption.isEmpty)
-            XCTAssertLessThanOrEqual(mode.settingsCaption.count, 60)
-        }
-    }
 }

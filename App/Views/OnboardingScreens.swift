@@ -581,7 +581,7 @@ struct DoneScreen: View {
             .frame(maxWidth: OnboardingSpacing.column, alignment: .leading)
 
             Caption(
-                "Settings has the approval mode, which decides when iMCP asks before an action runs. Right now: \(serverController.approvalMode.title)."
+                "Settings has the Unattended switch, which decides whether iMCP shows its own confirmation windows. Right now: \(Unattended.isEnabled() ? "on, so iMCP approves without showing a window." : "off, so confirmations open a window.")."
             )
 
             Button("Go Through Setup Again") { model.reset(mode: .firstRun) }

@@ -27,7 +27,7 @@ enum DevBootstrap {
 
     static let iosUnpairedDefaultsKey = "devBootstrap.iosUnpaired"
     static let macUnpairedDeviceIDsKey = "devBootstrap.macUnpairedDeviceIDs"
-    static let macApprovalModeSeededKey = "devBootstrap.macApprovalModeSeeded"
+    static let macUnattendedSeededKey = "devBootstrap.macApprovalModeSeeded"
     static let macCloudflareSeededKey = "devBootstrap.macCloudflareSeeded"
 
     static var deviceID: String {
@@ -257,11 +257,13 @@ enum DevBootstrap {
                 }
             }
 
-            if !defaults.bool(forKey: macApprovalModeSeededKey) {
-                if defaults.string(forKey: ApprovalMode.defaultsKey) == nil {
-                    ApprovalMode.setCurrent(.agentManaged, defaults: defaults)
+            if !defaults.bool(forKey: macUnattendedSeededKey) {
+                if defaults.object(forKey: Unattended.defaultsKey) == nil,
+                    defaults.string(forKey: Unattended.legacyDefaultsKey) == nil
+                {
+                    defaults.set(true, forKey: Unattended.defaultsKey)
                 }
-                defaults.set(true, forKey: macApprovalModeSeededKey)
+                defaults.set(true, forKey: macUnattendedSeededKey)
             }
         }
 
