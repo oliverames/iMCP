@@ -1,5 +1,19 @@
 # Worklog
 
+## 2026-11-20 - Ported the #378, #384 and #390 review fixes to fork main
+
+**What changed**: The fork's integration build still had the pre-review Reminders, Notes and AppleScript helper code, so the fixes Mattt is reviewing upstream were not in it. Ported all three:
+
+- **Reminders**: clamp stored relative alarms instead of trapping; all-day and timed dues carry the reminder's calendar and time zone and keep seconds; views read the stored time zone; the house number is part of the street match and a bare locality is rejected; `reminders_complete` is gated by `reminders_update` and rename by `reminders_lists_rename`; a complete with no readback is uncertain and stops the batch; `reminders_update` accepts `completion_date`; `notes_tags` reads the database tag records (the fork's scan-based `tagsResult` and duplicate tool were removed).
+- **Notes**: the scan budget counts `scannedNoteCount` and caps the page request; unreadable notes are kept whether or not they matched; tag filters read the database tag records; `keywords` is no longer overwritten from note text; short table rows are not padded; `TagTally` is gone.
+- **AppleScript**: `beforeSending` is `@Sendable`, the `nonisolated(unsafe)` binding is gone, and cancellation is checked after the hook returns.
+
+**Verification**: `imcp-serverTests` 781 tests, 0 failures; `swift format lint --strict` clean; the `iMCP` scheme builds (signed with the fork's team).
+
+**Left off at**: All of Mattt's findings are addressed upstream and replied to; the fork is in step. Remaining: his re-review and merges, the TopoText #5 CI approval (first-time contributor), and rebasing the PRs whose macOS 26 job is red once #393 lands.
+
+---
+
 ## 2026-11-20 - Ran the TopoText validation and the signed sandboxed Files pass
 
 **What changed**:
