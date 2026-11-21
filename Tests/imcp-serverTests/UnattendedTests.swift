@@ -22,9 +22,9 @@ final class UnattendedTests: XCTestCase {
 
     // MARK: - Model & Persistence
 
-    func testDefaultsToOnAndPersistsSelection() {
-        // An unattended Mac gets no popups unless the person turns this off.
-        XCTAssertTrue(Unattended.isEnabled(defaults: defaults))
+    func testDefaultsToOffAndPersistsSelection() {
+        // A new install shows confirmation windows until the person turns this on.
+        XCTAssertFalse(Unattended.isEnabled(defaults: defaults))
 
         for enabled in [false, true] {
             Unattended.setEnabled(enabled, defaults: defaults)
@@ -47,7 +47,7 @@ final class UnattendedTests: XCTestCase {
 
         // An unknown or missing legacy value behaves like a fresh install.
         defaults.set("unexpectedMode", forKey: Unattended.legacyDefaultsKey)
-        XCTAssertTrue(Unattended.isEnabled(defaults: defaults))
+        XCTAssertFalse(Unattended.isEnabled(defaults: defaults))
 
         // Once the person chooses, the legacy value no longer matters.
         defaults.set("askEverything", forKey: Unattended.legacyDefaultsKey)

@@ -14,18 +14,18 @@ enum Unattended {
     /// Its value decides the default until the new setting is chosen.
     static let legacyDefaultsKey = "approvalMode"
 
-    /// Whether confirmations are auto-approved, using `true` until the person chooses.
+    /// Whether confirmations are auto-approved, using `false` until the person chooses.
     /// A choice made under the replaced approval modes decides the default:
-    /// the modes that asked in iMCP become `false`, and the rest become `true`.
+    /// the full-access modes that never showed iMCP windows become `true`, and the rest become `false`.
     static func isEnabled(defaults: UserDefaults = .standard) -> Bool {
         if defaults.object(forKey: defaultsKey) != nil {
             return defaults.bool(forKey: defaultsKey)
         }
         switch defaults.string(forKey: legacyDefaultsKey) {
-        case "askEverything", "askWritesOnly":
-            return false
-        default:
+        case "agentManaged", "allowEverything":
             return true
+        default:
+            return false
         }
     }
 
