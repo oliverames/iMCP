@@ -1098,7 +1098,7 @@ macOS can ask you to allow iMCP in System Settings > General > Login Items & Ext
 iMCP opens that pane and turns Home off until you do.
 Once the agent is registered, launchd starts the helper in your login session
 the first time iMCP connects to its Mach service,
-so the helper can show a window and HomeKit's permission prompt.
+so the helper can serve HomeKit calls without a window of its own.
 The prompt names iMCP, not the helper:
 macOS attributes the helper's HomeKit request to the app that contains it,
 which is why iMCP's own Info.plist carries `NSHomeKitUsageDescription`.
@@ -1138,12 +1138,13 @@ Writes are not repeated, because HomeKit may have applied them already;
 the error asks the caller to inspect the home before retrying.
 HomeKit sometimes refuses characteristic reads, accessory identification,
 and scene action edits with "Missing entitlement for API" or "Request not handled".
-In some tests, these refusals happened only while the helper was hidden,
-or its window was minimized or closed,
-but other tests didn't reproduce them, so the cause isn't confirmed.
-The error keeps HomeKit's description, domain, and code,
-and suggests showing iMCP Helper's window and retrying;
-the window can stay behind other windows.
+Those refusals happened with the older helper that iMCP called through Apple Events,
+and they still happened with the helper's window open,
+so the window was not the cause.
+The fix was to bundle the helper and reach it over XPC,
+which is how this build works: the helper runs as a launch agent
+with no window of its own, so nothing appears on screen while the home is controlled.
+The error keeps HomeKit's description, domain, and code.
 With Home turned on in iMCP,
 `uv run Scripts/check-home.py <path-to-imcp-server>` runs a read-only
 integration check through iMCP.
