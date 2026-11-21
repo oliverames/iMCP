@@ -626,57 +626,61 @@ enum NotesOrganizeScripts {
     }
 }
 
+/// What a note holds, read from the Notes database for a note named by its scripting id.
+/// It throws when that can't be read.
+typealias NotesTraitLookup = @Sendable (String) async throws -> NoteTraits
+
 /// Refuses to rewrite a note whose body holds structure that scripting can't carry.
 ///
-/// `notes_update` and `notes_append` set the note's whole HTML body, so anything the HTML
-/// can't express is dropped without an error: checklist state, native tags, tables, and
-/// link previews. A shared note is refused too, because a rewrite replaces the collaborators'
-/// edits. `notes_append_rich` goes through Notes' own editor and keeps all of these.
+/// `notes_update` and `notes_append` set the note's whole HTML body, and the HTML that scripting
+/// exports hides what the note really holds: a checklist is a plain list, a link has no `href`, and
+/// a tag is an inline attachment. So the structure is read from the database (`NoteTraits`), and the
+/// guard fails closed: a note whose structure can't be read is refused. A shared note is refused too,
+/// because a rewrite replaces the collaborators' edits. `notes_append_rich` goes through Notes' own
+/// editor and keeps all of these.
 enum NotesRewriteGuard {
     /// What a rewrite of this note would damage, in the words used in the refusal.
-    static func hazards(of note: NotesScriptNote) -> [String] {
+    static func hazards(shared: Bool, plainText: String, traits: NoteTraits?) -> [String] {
         var found: [String] = []
-        if note.isShared { found.append("it is shared") }
-        let html = note.bodyHTML.lowercased()
-        if containsChecklist(html) { found.append("it has a checklist") }
-        if html.contains("<table") { found.append("it has a table") }
-        if containsTag(html: html, plainText: note.plainText) { found.append("it has native tags") }
-        if containsLinkPreview(html) { found.append("it has a link preview") }
+        if shared { found.append("it is shared") }
+        // An inline attachment, such as a tag or a link card, shows in scripting's plain text as U+FFFC.
+        if plainText.contains("\u{FFFC}") { found.append("it has inline objects") }
+        guard let traits else { return found }
+        if traits.features.contains(.checklist) { found.append("it has a checklist") }
+        if traits.features.contains(.table) { found.append("it has a table") }
+        if traits.features.contains(.link) { found.append("it has links") }
+        if !traits.tags.isEmpty { found.append("it has native tags") }
         return found
     }
 
-    /// Throws when the note can't be rewritten without loss. Plain notes pass.
-    static func requireSafeToRewrite(_ note: NotesScriptNote, tool: String) throws {
-        let found = hazards(of: note)
+    /// Throws when the note can't be rewritten without loss, or when that can't be checked.
+    static func requireSafeToRewrite(
+        _ note: NotesScriptNote,
+        tool: String,
+        lookup: NotesTraitLookup
+    ) async throws {
+        let advice = "Nothing was written. Use notes_append_rich to add text to this note."
+        // A locked note has no readable text, and the script refuses it.
+        if note.isPasswordProtected { return }
+        // These need no database read.
+        let early = hazards(shared: note.isShared, plainText: note.plainText, traits: nil)
+        if !early.isEmpty {
+            throw NotesWriteError.invalid(
+                "\(tool) would rewrite the whole note and lose its structure, because \(early.joined(separator: ", ")). \(advice)"
+            )
+        }
+        let traits: NoteTraits
+        do {
+            traits = try await lookup(note.id)
+        } catch {
+            throw NotesWriteError.invalid(
+                "\(tool) could not check the note's structure (\(error.localizedDescription)), so nothing was written. Use notes_append_rich, which keeps the note's structure."
+            )
+        }
+        let found = hazards(shared: false, plainText: "", traits: traits)
         guard !found.isEmpty else { return }
         throw NotesWriteError.invalid(
-            "\(tool) would rewrite the whole note and lose its structure, because \(found.joined(separator: ", ")). Nothing was written. Use notes_append_rich to add text to this note."
+            "\(tool) would rewrite the whole note and lose its structure, because \(found.joined(separator: ", ")). \(advice)"
         )
-    }
-
-    private static func containsChecklist(_ html: String) -> Bool {
-        html.contains("type=\"checkbox\"") || html.contains("type='checkbox'")
-            || html.range(of: #"class\s*=\s*["'][^"']*(checklist|todo)"#, options: .regularExpression) != nil
-            || html.contains("data-apple-checklist") || html.contains("data-checked")
-    }
-
-    /// A native tag shows in HTML as a hashtag-classed element, and in the plain text as
-    /// `#word` at the start of a word.
-    private static func containsTag(html: String, plainText: String) -> Bool {
-        if html.range(of: #"(class|data-[a-z-]*)\s*=\s*["'][^"']*hashtag"#, options: .regularExpression) != nil {
-            return true
-        }
-        return plainText.range(of: #"(^|\s)#[\p{L}\p{N}_]"#, options: .regularExpression) != nil
-    }
-
-    /// A link preview is a rich link card, which the HTML carries as an `<object>` element
-    /// or an element classed as a link or URL preview.
-    private static func containsLinkPreview(_ html: String) -> Bool {
-        html.contains("<object")
-            || html.range(
-                of: #"class\s*=\s*["'][^"']*(link|url)-?(preview|card|attachment)"#,
-                options: .regularExpression
-            )
-                != nil
     }
 }

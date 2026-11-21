@@ -460,6 +460,25 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         }
     }
 
+    /// What the database says a note holds, for a note named by its scripting id.
+    ///
+    /// The database names notes by UUID and the scripting interface by `x-coredata://…/ICNote/pN`,
+    /// and nothing in the database maps one to the other, so the UUID comes from the NotesShared
+    /// bridge (`notes_structure`), which looks the note up by its scripting id. That needs
+    /// "Private Notes features" turned on; without it, this throws and the caller refuses.
+    func traits(ofScriptedNote scriptingID: String) async throws -> NoteTraits {
+        let structure = try await NotesPrivate.run(tool: "notes_structure", arguments: ["id": scriptingID])
+        guard let uuid = structure["identifier"] as? String, let id = TopoText.Note.ID(uuid) else {
+            throw ArgumentError.invalid("Notes gave no database identifier for the note")
+        }
+        try checkDatabaseAccess()
+        return try await withStore { store in
+            try await store.withSnapshot { snapshot in
+                NoteTraits(content: try snapshot.content(for: id))
+            }
+        }
+    }
+
     // MARK: - Database Access
 
     /// Ensures the Notes database is readable, asking the user to grant access if needed.

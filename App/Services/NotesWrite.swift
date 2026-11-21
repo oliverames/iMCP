@@ -19,7 +19,8 @@ extension NotesService {
             )
             + NotesOrganizeTools.tools(
                 isEnabled: { NotesWriteTools.isEnabledInSettings },
-                runner: AppleNotesScriptRunner()
+                runner: AppleNotesScriptRunner(),
+                traitLookup: { try await NotesService.shared.traits(ofScriptedNote: $0) }
             )
             + NotesPrivateTools.tools
     }

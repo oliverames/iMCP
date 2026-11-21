@@ -1,5 +1,6 @@
 import Foundation
 import MCP
+import TopoText
 import XCTest
 import os
 
@@ -265,7 +266,8 @@ final class NotesOrganizeTests: XCTestCase {
             uniqueKeysWithValues: NotesOrganizeTools.tools(
                 isEnabled: { enabled },
                 runner: runner,
-                attachmentFolder: attachmentFolder
+                attachmentFolder: attachmentFolder,
+                traitLookup: { _ in NoteTraits(content: TopoText.Note.Content(paragraphs: [])) }
             ).map { ($0.name, $0) }
         )
     }
@@ -332,67 +334,101 @@ final class NotesOrganizeTests: XCTestCase {
 
     // MARK: - Rewrite guard
 
-    private func scriptNote(html: String, plain: String = "Plan\nline", shared: Bool = false) throws -> NotesScriptNote
-    {
-        try NotesScriptNote(fields: [
-            "x-coredata://ABC/ICNote/p12", "Plan", "f", "Work", "2026-11-16T09:30:00", "2026-11-17T10:00:00",
-            plain, html, "false", shared ? "true" : "false", "0", "iCloud",
-        ])
+    private typealias Content = TopoText.Note.Content
+    private typealias Paragraph = TopoText.Note.Paragraph
+    private typealias Run = TopoText.Note.TextRun
+
+    private func traits(_ paragraphs: [Paragraph]) -> NoteTraits {
+        NoteTraits(content: Content(paragraphs: paragraphs))
     }
 
-    func testRewriteGuardDetectsStructureThatScriptingDrops() throws {
-        let plain = "<div><h1>Plan</h1></div><div>just text <b>bold</b></div><ul><li>a</li></ul>"
-        XCTAssertEqual(NotesRewriteGuard.hazards(of: try scriptNote(html: plain)), [])
-        let cases: [(String, String)] = [
-            ("<ul class=\"Apple-checklist\"><li>x</li></ul>", "checklist"),
-            ("<ul class=\"todo-list\"><li><input type=\"checkbox\"> x</li></ul>", "checklist"),
-            ("<div><table><tbody><tr><td>a</td></tr></tbody></table></div>", "table"),
-            ("<div><span class=\"hashtag\">#Travel</span></div>", "tags"),
-            ("<div><object data=\"x\"></object></div>", "link preview"),
-            ("<div><a class=\"link-preview\" href=\"https://x.test\">x</a></div>", "link preview"),
+    private func inline(_ id: String, type: String, text: String? = nil) -> Run {
+        Run(
+            text: "\u{FFFC}",
+            attachment: TopoText.Note.Attachment(
+                id: TopoText.Note.Attachment.ID(id)!,
+                typeIdentifier: type,
+                displayText: text,
+                title: id,
+                url: nil,
+                fileName: nil
+            )
+        )
+    }
+
+    private var plainTraits: NoteTraits { traits([Paragraph(runs: [Run(text: "Plan line")])]) }
+    private var checklistTraits: NoteTraits {
+        traits([Paragraph(style: .init(kind: .checklist), runs: [Run(text: "Passport")])])
+    }
+    private var tagTraits: NoteTraits {
+        traits([
+            Paragraph(runs: [
+                Run(text: "Trip "), inline("T1", type: "com.apple.notes.inlinetextattachment.hashtag", text: "#Travel"),
+            ])
+        ])
+    }
+    private var linkTraits: NoteTraits {
+        traits([Paragraph(runs: [Run(text: "docs", link: "https://example.com/docs")])])
+    }
+    private var tableTraits: NoteTraits {
+        traits([Paragraph(runs: [inline("TB", type: "com.apple.notes.table")])])
+    }
+
+    private struct LookupFailed: Error {}
+
+    private func updateAndAppend(
+        for runner: FakeRunner,
+        lookup: @escaping NotesTraitLookup
+    ) -> [(String, () async throws -> Value)] {
+        let all = Dictionary(
+            uniqueKeysWithValues: NotesOrganizeTools.tools(
+                isEnabled: { true },
+                runner: runner,
+                traitLookup: lookup
+            ).map { ($0.name, $0) }
+        )
+        let hash = NotesContentHash.hash(of: runner.plain)
+        let id = noteID
+        return [
+            (
+                "notes_update",
+                {
+                    try await all["notes_update"]!([
+                        "id": .string(id), "expectedContentHash": .string(hash), "body": "x",
+                    ])
+                }
+            ),
+            ("notes_append", { try await all["notes_append"]!(["id": .string(id), "text": "x"]) }),
+            (
+                "notes_append+hash",
+                {
+                    try await all["notes_append"]!([
+                        "id": .string(id), "text": "x", "expectedContentHash": .string(hash),
+                    ])
+                }
+            ),
         ]
-        for (html, word) in cases {
-            let found = NotesRewriteGuard.hazards(of: try scriptNote(html: html))
-            XCTAssertTrue(found.contains { $0.contains(word) }, "\(html) -> \(found)")
-        }
-        // A tag is also visible in the plain text, whatever its HTML looks like.
-        XCTAssertTrue(
-            NotesRewriteGuard.hazards(of: try scriptNote(html: "<div>x</div>", plain: "Plan\ntrip #Travel")).contains {
-                $0.contains("tags")
-            }
-        )
-        // A # inside a word or alone is not a tag.
-        XCTAssertEqual(
-            NotesRewriteGuard.hazards(of: try scriptNote(html: "<div>x</div>", plain: "C# issue #, a#b")),
-            []
-        )
-        XCTAssertEqual(
-            NotesRewriteGuard.hazards(of: try scriptNote(html: "<div>x</div>", shared: true)),
-            ["it is shared"]
-        )
     }
 
     func testUpdateAndAppendRefuseNotesThatWouldLoseStructure() async throws {
-        let notes: [(String, FakeRunner)] = [
-            ("checklist", FakeRunner(html: "<ul class=\"Apple-checklist\"><li>x</li></ul>")),
-            ("table", FakeRunner(html: "<table><tr><td>a</td></tr></table>")),
-            ("tag", FakeRunner(plain: "Plan\n#Travel")),
-            ("shared", FakeRunner(shared: true)),
+        let checklist = checklistTraits, tag = tagTraits, link = linkTraits, table = tableTraits, plain = plainTraits
+        let refused: [(String, FakeRunner, NotesTraitLookup, String)] = [
+            ("checklist", FakeRunner(), { _ in checklist }, "checklist"),
+            ("tag", FakeRunner(), { _ in tag }, "native tags"),
+            ("link", FakeRunner(), { _ in link }, "links"),
+            ("table", FakeRunner(), { _ in table }, "table"),
+            ("unreadable", FakeRunner(), { _ in throw LookupFailed() }, "could not check the note's structure"),
+            ("U+FFFC", FakeRunner(plain: "Plan\n\u{FFFC} x"), { _ in plain }, "inline objects"),
+            ("shared", FakeRunner(shared: true), { _ in plain }, "shared"),
         ]
-        for (label, runner) in notes {
-            let all = tools(runner: runner)
-            let currentHash = NotesContentHash.hash(of: runner.plain)
-            let calls: [(String, [String: Value])] = [
-                ("notes_update", ["id": .string(noteID), "expectedContentHash": .string(currentHash), "body": "x"]),
-                ("notes_append", ["id": .string(noteID), "text": "x"]),
-                ("notes_append", ["id": .string(noteID), "text": "x", "expectedContentHash": .string(currentHash)]),
-            ]
-            for (tool, arguments) in calls {
+        for (label, runner, lookup, expected) in refused {
+            for (tool, call) in updateAndAppend(for: runner, lookup: lookup) {
                 do {
-                    _ = try await all[tool]!(arguments)
+                    _ = try await call()
                     XCTFail("\(tool) rewrote a \(label) note")
                 } catch {
                     let message = (error as? NotesWriteError)?.errorDescription ?? "\(error)"
+                    XCTAssertTrue(message.contains(expected), "\(label) \(tool): \(message)")
                     XCTAssertTrue(message.contains("notes_append_rich"), "\(label) \(tool): \(message)")
                 }
             }
@@ -404,13 +440,8 @@ final class NotesOrganizeTests: XCTestCase {
 
         // A plain note still works, with and without a hash.
         let runner = FakeRunner()
-        let all = tools(runner: runner)
-        _ = try await all["notes_update"]!([
-            "id": .string(noteID), "expectedContentHash": .string(NotesContentHash.hash(of: "Plan\nline")),
-            "body": "x",
-        ])
-        _ = try await all["notes_append"]!(["id": .string(noteID), "text": "x"])
-        XCTAssertEqual(runner.recorded.filter { ["updateNote", "appendToNote"].contains($0.name) }.count, 2)
+        for (_, call) in updateAndAppend(for: runner, lookup: { _ in plain }) { _ = try await call() }
+        XCTAssertEqual(runner.recorded.filter { ["updateNote", "appendToNote"].contains($0.name) }.count, 3)
     }
 
     // MARK: - Attachment folder

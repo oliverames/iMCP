@@ -39,10 +39,16 @@ enum NotesOrganizeTools {
     static func tools(
         isEnabled: @escaping @Sendable () -> Bool,
         runner: any NotesScriptRunning,
-        attachmentFolder: URL = NotesAttachmentFolder.defaultURL
+        attachmentFolder: URL = NotesAttachmentFolder.defaultURL,
+        traitLookup: @escaping NotesTraitLookup
     ) -> [Tool] {
         readTools(runner: runner)
-            + writeTools(isEnabled: isEnabled, runner: runner, attachmentFolder: attachmentFolder)
+            + writeTools(
+                isEnabled: isEnabled,
+                runner: runner,
+                attachmentFolder: attachmentFolder,
+                traitLookup: traitLookup
+            )
     }
 
     // MARK: - Reading
@@ -305,7 +311,8 @@ enum NotesOrganizeTools {
     static func writeTools(
         isEnabled: @escaping @Sendable () -> Bool,
         runner: any NotesScriptRunning,
-        attachmentFolder: URL = NotesAttachmentFolder.defaultURL
+        attachmentFolder: URL = NotesAttachmentFolder.defaultURL,
+        traitLookup: @escaping NotesTraitLookup
     ) -> [Tool] {
         let formatValue: JSONSchema =
             .string(
@@ -345,7 +352,7 @@ enum NotesOrganizeTools {
                 try NotesWriteTools.requireEnabled(isEnabled())
                 let id = try requiredID(in: arguments)
                 let note = try await fetchNote(id, runner: runner)
-                try NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_update")
+                try await NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_update", lookup: traitLookup)
                 try NotesContentHash.requireCurrent(
                     note,
                     expected: try requiredString("expectedContentHash", in: arguments)
@@ -404,7 +411,7 @@ enum NotesOrganizeTools {
                 // The note is always read, so a rewrite that would lose structure is refused
                 // whether or not the caller passed a hash.
                 let note = try await fetchNote(id, runner: runner)
-                try NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_append")
+                try await NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_append", lookup: traitLookup)
                 var expected: String?
                 if let hash = try string("expectedContentHash", in: arguments) {
                     try NotesContentHash.requireCurrent(note, expected: hash)
