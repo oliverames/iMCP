@@ -1,25 +1,25 @@
 import Foundation
-import XCTest
 
 /// Throwaway `UserDefaults` suites for tests.
 ///
 /// `removePersistentDomain(forName:)` empties a suite but leaves its plist in
 /// `~/Library/Preferences`, so every test run used to leave hundreds of files there.
-/// A suite made here is emptied and its file deleted when the test bundle finishes.
+/// A suite made here is emptied and its file deleted when the test process exits.
+/// An exit handler is used rather than a test observer, because XCTest only lets
+/// observers register on the main thread and suites are made from any thread.
 enum TestDefaults {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var names: Set<String> = []
-    nonisolated(unsafe) private static var cleanup: Cleanup?
+    nonisolated(unsafe) private static var registered = false
 
     /// The suite with this name, removed with its file when the run ends.
     /// Use it wherever a test would call `UserDefaults(suiteName:)`.
     static func suite(named name: String) -> UserDefaults? {
         lock.withLock {
             names.insert(name)
-            if cleanup == nil {
-                let observer = Cleanup()
-                cleanup = observer
-                XCTestObservationCenter.shared.addTestObserver(observer)
+            if !registered {
+                registered = true
+                atexit { TestDefaults.removeAll() }
             }
         }
         return UserDefaults(suiteName: name)
@@ -39,11 +39,5 @@ enum TestDefaults {
             return names
         }
         for name in all { remove(name) }
-    }
-
-    private final class Cleanup: NSObject, XCTestObservation {
-        func testBundleDidFinish(_ testBundle: Bundle) {
-            TestDefaults.removeAll()
-        }
     }
 }
