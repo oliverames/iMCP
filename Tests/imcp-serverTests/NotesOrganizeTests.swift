@@ -221,10 +221,19 @@ final class NotesOrganizeTests: XCTestCase {
         private let calls = OSAllocatedUnfairLock(initialState: [NSAppleScript.Subroutine]())
         var recorded: [NSAppleScript.Subroutine] { calls.withLock { $0 } }
         let plain: String
+        let html: String
+        let shared: Bool
         let failingIDs: Set<String>
 
-        init(plain: String = "Plan\nline", failingIDs: Set<String> = []) {
+        init(
+            plain: String = "Plan\nline",
+            html: String = "<div><h1>Plan</h1></div>",
+            shared: Bool = false,
+            failingIDs: Set<String> = []
+        ) {
             self.plain = plain
+            self.html = html
+            self.shared = shared
             self.failingIDs = failingIDs
         }
 
@@ -237,7 +246,7 @@ final class NotesOrganizeTests: XCTestCase {
             case "getNote":
                 return [
                     "x-coredata://ABC/ICNote/p12", "Plan", "f", "Work", "2026-11-16T09:30:00", "2026-11-17T10:00:00",
-                    plain, "<div><h1>Plan</h1></div>", "false", "false", "0", "iCloud",
+                    plain, html, "false", shared ? "true" : "false", "0", "iCloud",
                 ]
             case "updateNote", "appendToNote": return ["x-coredata://ABC/ICNote/p12", "Plan", "2026-11-17T11:00:00"]
             case "deleteNote": return ["x-coredata://ABC/ICNote/p12", "Plan"]
@@ -247,9 +256,17 @@ final class NotesOrganizeTests: XCTestCase {
         }
     }
 
-    private func tools(enabled: Bool = true, runner: FakeRunner = FakeRunner()) -> [String: Tool] {
+    private func tools(
+        enabled: Bool = true,
+        runner: FakeRunner = FakeRunner(),
+        attachmentFolder: URL = NotesAttachmentFolder.defaultURL
+    ) -> [String: Tool] {
         Dictionary(
-            uniqueKeysWithValues: NotesOrganizeTools.tools(isEnabled: { enabled }, runner: runner).map { ($0.name, $0) }
+            uniqueKeysWithValues: NotesOrganizeTools.tools(
+                isEnabled: { enabled },
+                runner: runner,
+                attachmentFolder: attachmentFolder
+            ).map { ($0.name, $0) }
         )
     }
 
@@ -311,6 +328,164 @@ final class NotesOrganizeTests: XCTestCase {
         // Only the read happened.
         XCTAssertEqual(runner.recorded.count, before + 1)
         XCTAssertEqual(runner.recorded.last?.name, "getNote")
+    }
+
+    // MARK: - Rewrite guard
+
+    private func scriptNote(html: String, plain: String = "Plan\nline", shared: Bool = false) throws -> NotesScriptNote
+    {
+        try NotesScriptNote(fields: [
+            "x-coredata://ABC/ICNote/p12", "Plan", "f", "Work", "2026-11-16T09:30:00", "2026-11-17T10:00:00",
+            plain, html, "false", shared ? "true" : "false", "0", "iCloud",
+        ])
+    }
+
+    func testRewriteGuardDetectsStructureThatScriptingDrops() throws {
+        let plain = "<div><h1>Plan</h1></div><div>just text <b>bold</b></div><ul><li>a</li></ul>"
+        XCTAssertEqual(NotesRewriteGuard.hazards(of: try scriptNote(html: plain)), [])
+        let cases: [(String, String)] = [
+            ("<ul class=\"Apple-checklist\"><li>x</li></ul>", "checklist"),
+            ("<ul class=\"todo-list\"><li><input type=\"checkbox\"> x</li></ul>", "checklist"),
+            ("<div><table><tbody><tr><td>a</td></tr></tbody></table></div>", "table"),
+            ("<div><span class=\"hashtag\">#Travel</span></div>", "tags"),
+            ("<div><object data=\"x\"></object></div>", "link preview"),
+            ("<div><a class=\"link-preview\" href=\"https://x.test\">x</a></div>", "link preview"),
+        ]
+        for (html, word) in cases {
+            let found = NotesRewriteGuard.hazards(of: try scriptNote(html: html))
+            XCTAssertTrue(found.contains { $0.contains(word) }, "\(html) -> \(found)")
+        }
+        // A tag is also visible in the plain text, whatever its HTML looks like.
+        XCTAssertTrue(
+            NotesRewriteGuard.hazards(of: try scriptNote(html: "<div>x</div>", plain: "Plan\ntrip #Travel")).contains {
+                $0.contains("tags")
+            }
+        )
+        // A # inside a word or alone is not a tag.
+        XCTAssertEqual(
+            NotesRewriteGuard.hazards(of: try scriptNote(html: "<div>x</div>", plain: "C# issue #, a#b")),
+            []
+        )
+        XCTAssertEqual(
+            NotesRewriteGuard.hazards(of: try scriptNote(html: "<div>x</div>", shared: true)),
+            ["it is shared"]
+        )
+    }
+
+    func testUpdateAndAppendRefuseNotesThatWouldLoseStructure() async throws {
+        let notes: [(String, FakeRunner)] = [
+            ("checklist", FakeRunner(html: "<ul class=\"Apple-checklist\"><li>x</li></ul>")),
+            ("table", FakeRunner(html: "<table><tr><td>a</td></tr></table>")),
+            ("tag", FakeRunner(plain: "Plan\n#Travel")),
+            ("shared", FakeRunner(shared: true)),
+        ]
+        for (label, runner) in notes {
+            let all = tools(runner: runner)
+            let currentHash = NotesContentHash.hash(of: runner.plain)
+            let calls: [(String, [String: Value])] = [
+                ("notes_update", ["id": .string(noteID), "expectedContentHash": .string(currentHash), "body": "x"]),
+                ("notes_append", ["id": .string(noteID), "text": "x"]),
+                ("notes_append", ["id": .string(noteID), "text": "x", "expectedContentHash": .string(currentHash)]),
+            ]
+            for (tool, arguments) in calls {
+                do {
+                    _ = try await all[tool]!(arguments)
+                    XCTFail("\(tool) rewrote a \(label) note")
+                } catch {
+                    let message = (error as? NotesWriteError)?.errorDescription ?? "\(error)"
+                    XCTAssertTrue(message.contains("notes_append_rich"), "\(label) \(tool): \(message)")
+                }
+            }
+            XCTAssertFalse(
+                runner.recorded.contains { ["updateNote", "appendToNote"].contains($0.name) },
+                "\(label) note was written"
+            )
+        }
+
+        // A plain note still works, with and without a hash.
+        let runner = FakeRunner()
+        let all = tools(runner: runner)
+        _ = try await all["notes_update"]!([
+            "id": .string(noteID), "expectedContentHash": .string(NotesContentHash.hash(of: "Plan\nline")),
+            "body": "x",
+        ])
+        _ = try await all["notes_append"]!(["id": .string(noteID), "text": "x"])
+        XCTAssertEqual(runner.recorded.filter { ["updateNote", "appendToNote"].contains($0.name) }.count, 2)
+    }
+
+    // MARK: - Attachment folder
+
+    private func makeFolder() throws -> (root: URL, folder: URL, outside: URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("imcp-folder-\(UUID().uuidString)")
+        let folder = root.appendingPathComponent("attachments")
+        let outside = root.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        return (root, folder, outside)
+    }
+
+    func testAttachmentPathsMustStayInsideTheFolder() throws {
+        let (root, folder, outside) = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inside = folder.appendingPathComponent("a.txt")
+        try Data("a".utf8).write(to: inside)
+        let secret = outside.appendingPathComponent("secret.txt")
+        try Data("s".utf8).write(to: secret)
+        try FileManager.default.createSymbolicLink(
+            at: folder.appendingPathComponent("link.txt"),
+            withDestinationURL: secret
+        )
+        try FileManager.default.createSymbolicLink(
+            at: folder.appendingPathComponent("dir"),
+            withDestinationURL: outside
+        )
+
+        XCTAssertNoThrow(try NotesAttachmentFolder.resolveExisting(inside.path, in: folder))
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveExisting(secret.path, in: folder))
+        XCTAssertThrowsError(
+            try NotesAttachmentFolder.resolveExisting(folder.path + "/../outside/secret.txt", in: folder)
+        )
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveExisting(folder.path + "/link.txt", in: folder))
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveExisting(folder.path + "/dir/secret.txt", in: folder))
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveExisting(folder.path, in: folder))
+
+        XCTAssertNoThrow(try NotesAttachmentFolder.resolveNew(folder.path + "/new.png", in: folder))
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveNew(outside.path + "/new.png", in: folder))
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveNew(folder.path + "/../outside/new.png", in: folder))
+        XCTAssertThrowsError(try NotesAttachmentFolder.resolveNew(folder.path + "/dir/new.png", in: folder))
+    }
+
+    func testAttachmentToolsRefusePathsOutsideTheFolder() async throws {
+        let (root, folder, outside) = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let inside = folder.appendingPathComponent("a.txt")
+        try Data("a".utf8).write(to: inside)
+        let secret = outside.appendingPathComponent("secret.txt")
+        try Data("s".utf8).write(to: secret)
+        let runner = FakeRunner()
+        let all = tools(runner: runner, attachmentFolder: folder)
+
+        do {
+            _ = try await all["notes_add_attachment"]!(["id": .string(noteID), "path": .string(secret.path)])
+            XCTFail("attached a file outside the folder")
+        } catch {
+            XCTAssertNotNil(error as? NotesWriteError)
+        }
+        do {
+            _ = try await all["notes_save_attachment"]!([
+                "id": .string(noteID), "attachmentId": "a", "path": .string(outside.path + "/out.png"),
+            ])
+            XCTFail("saved a file outside the folder")
+        } catch {
+            XCTAssertNotNil(error as? NotesWriteError)
+        }
+        XCTAssertTrue(runner.recorded.isEmpty)
+
+        _ = try await all["notes_add_attachment"]!(["id": .string(noteID), "path": .string(inside.path)])
+        _ = try await all["notes_save_attachment"]!([
+            "id": .string(noteID), "attachmentId": "a", "path": .string(folder.path + "/out.png"),
+        ])
+        XCTAssertEqual(runner.recorded.map(\.name), ["addAttachment", "saveAttachment"])
     }
 
     func testBatchesReportEachNote() async throws {

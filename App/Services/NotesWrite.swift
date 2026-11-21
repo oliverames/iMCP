@@ -6,9 +6,10 @@ import Foundation
 /// notes are read from the database with TopoText, which never writes to it,
 /// and a new note or folder is made through the Notes app's own scripting interface,
 /// so Notes stores it as it stores anything else that it makes.
-/// Creating is all that iMCP does there.
-/// Editing an existing note through scripting is known to drop attachments, checklists, links, and tags
-/// without an error, so iMCP doesn't offer it.
+/// `notes_update` and `notes_append` also edit an existing note through scripting, which sets the
+/// whole HTML body and so drops checklist state, native tags, tables, link previews, and attachments
+/// without an error. They refuse a note that has any of these, or is shared (`NotesRewriteGuard`),
+/// and `notes_append_rich` adds text to such a note through Notes' own editor.
 extension NotesService {
     var tools: [Tool] {
         readTools

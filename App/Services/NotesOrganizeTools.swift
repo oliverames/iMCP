@@ -34,13 +34,15 @@ enum NotesOrganizeTools {
     private static let changesNotice =
         "Allowed only while iMCP's Notes settings allow changes."
     private static let lossNotice =
-        "Setting a note's text through Notes' scripting interface drops what that interface can't carry: checklist state, native tags, tables, and link previews. A note with attachments or a password is refused."
+        "Setting a note's text through Notes' scripting interface drops what that interface can't carry: checklist state, native tags, tables, and link previews. So a note with a checklist, table, native tag, or link preview, a shared note, and a note with attachments or a password are refused; use notes_append_rich to add to those."
 
     static func tools(
         isEnabled: @escaping @Sendable () -> Bool,
-        runner: any NotesScriptRunning
+        runner: any NotesScriptRunning,
+        attachmentFolder: URL = NotesAttachmentFolder.defaultURL
     ) -> [Tool] {
-        readTools(runner: runner) + writeTools(isEnabled: isEnabled, runner: runner)
+        readTools(runner: runner)
+            + writeTools(isEnabled: isEnabled, runner: runner, attachmentFolder: attachmentFolder)
     }
 
     // MARK: - Reading
@@ -302,12 +304,13 @@ enum NotesOrganizeTools {
 
     static func writeTools(
         isEnabled: @escaping @Sendable () -> Bool,
-        runner: any NotesScriptRunning
+        runner: any NotesScriptRunning,
+        attachmentFolder: URL = NotesAttachmentFolder.defaultURL
     ) -> [Tool] {
         let formatValue: JSONSchema =
             .string(
                 description:
-                    "How the text is written: plaintext shows it as written, markdown converts it, and html passes it to Notes as HTML",
+                    "How the text is written: plaintext shows it as written, and markdown converts it",
                 default: .string(NotesContentFormat.plaintext.rawValue),
                 enum: NotesContentFormat.allCases.map { .string($0.rawValue) }
             )
@@ -342,6 +345,7 @@ enum NotesOrganizeTools {
                 try NotesWriteTools.requireEnabled(isEnabled())
                 let id = try requiredID(in: arguments)
                 let note = try await fetchNote(id, runner: runner)
+                try NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_update")
                 try NotesContentHash.requireCurrent(
                     note,
                     expected: try requiredString("expectedContentHash", in: arguments)
@@ -397,9 +401,12 @@ enum NotesOrganizeTools {
                     case .plaintext: NotesHTML.html(fromPlainText: text)
                     case .markdown: NotesMarkdown.html(from: text)
                     }
+                // The note is always read, so a rewrite that would lose structure is refused
+                // whether or not the caller passed a hash.
+                let note = try await fetchNote(id, runner: runner)
+                try NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_append")
                 var expected: String?
                 if let hash = try string("expectedContentHash", in: arguments) {
-                    let note = try await fetchNote(id, runner: runner)
                     try NotesContentHash.requireCurrent(note, expected: hash)
                     expected = note.plainText
                 }
@@ -616,11 +623,13 @@ enum NotesOrganizeTools {
             Tool(
                 name: "notes_add_attachment",
                 description:
-                    "Attach a file to the end of a note. Give the absolute path of a file that the Notes app can read, or the file's contents as base64 with its name. \(changesNotice)",
+                    "Attach a file to the end of a note. Give the absolute path of a file inside the attachments folder (\(attachmentFolder.path)), or the file's contents as base64 with its name. Paths outside that folder are refused. \(changesNotice)",
                 inputSchema: .object(
                     properties: [
                         "id": idValue,
-                        "path": .string(description: "The absolute path of the file to attach"),
+                        "path": .string(
+                            description: "The absolute path of the file to attach, inside \(attachmentFolder.path)"
+                        ),
                         "base64": .string(description: "The file's contents, base64 encoded, in place of path"),
                         "filename": .string(description: "The file's name, with its extension, for base64 contents"),
                     ],
@@ -639,7 +648,8 @@ enum NotesOrganizeTools {
                 var path: String
                 var cleanup: URL?
                 if let given = try string("path", in: arguments) {
-                    path = try NotesOrganizeInput.validatedPath(given, called: "path")
+                    let absolute = try NotesOrganizeInput.validatedPath(given, called: "path")
+                    path = try NotesAttachmentFolder.resolveExisting(absolute, in: attachmentFolder)
                 } else if let encoded = try string("base64", in: arguments) {
                     let staged = try NotesAttachmentStaging.stage(
                         base64: encoded,
@@ -664,12 +674,14 @@ enum NotesOrganizeTools {
             Tool(
                 name: "notes_save_attachment",
                 description:
-                    "Have the Notes app save one of a note's attachments to a file at an absolute path that Notes can write. List the attachment ids with notes_list_attachments. \(changesNotice)",
+                    "Have the Notes app save one of a note's attachments to a new file inside the attachments folder (\(attachmentFolder.path)). Paths outside that folder, and paths of files that already exist, are refused. List the attachment ids with notes_list_attachments. \(changesNotice)",
                 inputSchema: .object(
                     properties: [
                         "id": idValue,
                         "attachmentId": .string(description: "The attachment's id, from notes_list_attachments"),
-                        "path": .string(description: "The absolute path of the file to write"),
+                        "path": .string(
+                            description: "The absolute path of the new file to write, inside \(attachmentFolder.path)"
+                        ),
                     ],
                     required: ["id", "attachmentId", "path"],
                     additionalProperties: false
@@ -684,9 +696,12 @@ enum NotesOrganizeTools {
                 try NotesWriteTools.requireEnabled(isEnabled())
                 let id = try requiredID(in: arguments)
                 let attachment = try requiredString("attachmentId", in: arguments)
-                let path = try NotesOrganizeInput.validatedPath(
-                    try requiredString("path", in: arguments),
-                    called: "path"
+                let path = try NotesAttachmentFolder.resolveNew(
+                    try NotesOrganizeInput.validatedPath(
+                        try requiredString("path", in: arguments),
+                        called: "path"
+                    ),
+                    in: attachmentFolder
                 )
                 guard !FileManager.default.fileExists(atPath: path) else {
                     throw NotesWriteError.invalid("a file already exists at path")
@@ -812,6 +827,50 @@ enum NotesOrganizeTools {
             throw NotesWriteError.invalid("format must be one of: \(choices)")
         }
         return format
+    }
+}
+
+/// The one folder that `notes_add_attachment` reads from and `notes_save_attachment` writes to.
+///
+/// Both tools take a path from the caller, so without a boundary a client could attach
+/// any file iMCP can read to a note, or have Notes write anywhere iMCP can. A path is
+/// accepted only when, after symbolic links and `..` are resolved, it is inside this folder.
+enum NotesAttachmentFolder {
+    /// `Documents/iMCP Notes Attachments` in iMCP's own container.
+    static var defaultURL: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("iMCP Notes Attachments", isDirectory: true)
+    }
+
+    private static func resolvedFolder(_ folder: URL) throws -> String {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// The path of an existing file to attach, or throws when it is outside `folder`.
+    static func resolveExisting(_ path: String, in folder: URL = defaultURL) throws -> String {
+        let root = try resolvedFolder(folder)
+        let resolved = URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        guard resolved.hasPrefix(root + "/") else { throw outside(folder) }
+        return resolved
+    }
+
+    /// The path of a file to create, or throws when it would land outside `folder`.
+    /// The folder that holds it is resolved, so a symbolic link in the way is followed and judged.
+    static func resolveNew(_ path: String, in folder: URL = defaultURL) throws -> String {
+        let root = try resolvedFolder(folder)
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        let name = url.lastPathComponent
+        guard !name.isEmpty, name != ".", name != ".." else { throw outside(folder) }
+        let parent = url.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL.path
+        guard parent == root || parent.hasPrefix(root + "/") else { throw outside(folder) }
+        return URL(fileURLWithPath: parent).appendingPathComponent(name).path
+    }
+
+    private static func outside(_ folder: URL) -> NotesWriteError {
+        NotesWriteError.invalid(
+            "path must be inside the attachments folder, \(folder.path). Put the file there to attach it, or save into it."
+        )
     }
 }
 
