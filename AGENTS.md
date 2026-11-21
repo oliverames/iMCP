@@ -34,6 +34,51 @@ send the public commits alone.
   Home helper, the menu bar panel/status item, the iOS extras, and the
   Unattended switch.
 
+## What stays on the fork
+
+The fork carries work that is not going upstream. Do not move these into a PR
+to `mattt/iMCP`:
+
+- **Private APIs**: NotesShared (`NotesPrivate`, `NotesPrivateTools`,
+  `NotesSharedBridge.m`, the home-relative-path read-write entitlement) and
+  ReminderKit (`RemindersPrivate`, `RemindersPrivateTools`,
+  `ReminderKitBridge.m`).
+- **Notes editing through scripting**: `NotesWriting`, `NotesWriteTools`,
+  `NotesOrganize`, `NotesOrganizeTools`, `NotesExport`, `NotesWrite`. Mattt
+  declined the edit layer and is building a TopoText edit engine instead.
+- **Safari**: `Safari`, `SafariBookmarksFile`, `SafariScripting`. Mattt has his
+  own Safari service in progress.
+- **Music playlist writes**: `MusicPlaylistWrites`. Mattt gave another
+  contributor the first shot at the write side.
+- **Connectivity**: Cloudflare Tunnel (`CloudflareTunnel`,
+  `CloudflareTokenCheck`), Tailscale Funnel (`FunnelAccess`, with the
+  `oliverames/libtailscale` pin), OAuth 2.1 (`OAuthAuthority`, `OAuthEndpoints`,
+  `OAuthGrant`, `ClientMetadataFetcher`, `AccessToken`), and Tailscale remote
+  access (`TailscalePolicyAccess`, the HTTP transport, `RemoteAccessChecklist`).
+- **iOS**: the whole app (`iOS/`, `iOSWidgets/`), mobile sync and Approve on
+  iPhone (`Mobile`, `MobileCache`, `MobileApprovals`, `RemoteApprovals`,
+  `MobileActivity`), and the dev bootstrap (`DevBootstrap`,
+  `GeneratedBootstrapSecrets`).
+- **Menu bar**: the custom status item and panel (`MenuStructure`,
+  `MenuBarPanel`, `MenuBarView`, `MenuBarController`). Mattt declined it in
+  #382 because it collides with #316.
+- **Home helper**: the bundled XPC helper (`HomeHelperXPC`,
+  `HomeWindowPresence`). The helper app itself, `HomeBackend` and
+  `HomeHelperLocator` are upstream.
+- **Trust by code signature**: `ResponsibleApp` and the trusted-app tests.
+  Mattt is doing trust by code signature himself.
+- **Approvals**: the **Unattended** switch (`Unattended`) is the one approval
+  pattern that is fork-only. Allow writes and the shared confirmation window
+  are Mattt's design and go upstream in #377.
+- **Setup/onboarding**: `OnboardingFlow`, `RemoteAccessChecklist` (#387/#388/#389
+  are pending upstream).
+- **Local config and dev tooling**: `Config/*.local.xcconfig`, the local plists,
+  and the fork's `Scripts/` helpers (`generate-bootstrap-secrets.sh`,
+  `install-ios.sh`, `check-home.py`).
+
+Work that is in flight upstream is not on this list: #373, #377, #378, #384,
+#385, #390, #391, #392, #387, #388, #389 and #393.
+
 ## Working rules
 
 - Verify before claiming done: build the app, run `imcp-serverTests`, and run

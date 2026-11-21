@@ -1,5 +1,17 @@
 # Worklog
 
+## 2026-11-20 - Wrapped up the upstream/fork session
+
+**What changed**: Rewrote the session's pull request replies in Oliver's voice and tagged `@mattt` on every comment of his across `mattt/iMCP` (#364, #373, #377, #378, #380, #384, #385, #387, #390, #391, #392), #317 and `mattt/TopoText#4`, including seven older comments that had drifted in without the tag. The Home paragraph in the README now describes the bundled XPC helper and no longer suggests showing the helper's window (`76eb6f8`). `AGENTS.md` gained a "What stays on the fork" inventory: the private APIs, Notes editing, Safari, Music playlist writes, Cloudflare Tunnel, Funnel, OAuth, Tailscale remote access, the iOS app and mobile approvals, the custom menu bar panel, the bundled XPC Home helper, trust by code signature, the Unattended switch, and the dev bootstrap and local config.
+
+**Decisions made**: The fork's `main` is the buildable trunk and is in step with the upstream fixes; the upstream PRs stay split by concern. `oliverames/iMCP#13` is now the repository's single testing issue: #10 is closed and its remaining item moved there, and #12's live-checks list moved there too. #12 records the resolved sync and review fixes, the remaining upstream re-reviews, and the parked PRs.
+
+**Left off at**: Waiting on Mattt's re-review and merges of #373, #377, #378, #384, #385, #390, #391, #393 and `mattt/TopoText#5`, and on a maintainer approving TopoText#5's CI run. Once #393 merges, rebase #377/#378/#384/#385/#390 onto `main` so their macOS 26 jobs go green. #387/#388/#389 and #392 stay parked.
+
+**Open questions**: Whether to offer Mattt help with the TopoText notes-edit database-write side once his encoder holds up, and whether to retake the pr-assets screenshots now or after #387/#388 settle.
+
+---
+
 ## 2026-11-20 - Ported the #378, #384 and #390 review fixes to fork main
 
 **What changed**: The fork's integration build still had the pre-review Reminders, Notes and AppleScript helper code, so the fixes Mattt is reviewing upstream were not in it. Ported all three:
