@@ -53,6 +53,11 @@ jobs:
             - name: Lint
               run: swift format lint --strict --recursive .
 
+            # The dev bootstrap file is gitignored but the project compiles it,
+            # so CI writes the empty fallback that leaves the bootstrap off.
+            - name: Generate empty bootstrap secrets
+              run: IMCP_SKIP_1PASSWORD=1 Scripts/generate-bootstrap-secrets.sh
+
             - name: Build
               run: |
                   xcodebuild -quiet \
