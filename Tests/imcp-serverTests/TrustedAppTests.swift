@@ -17,7 +17,7 @@ final class TrustedAppTests: XCTestCase {
 
     override func setUp() async throws {
         suiteName = "imcp-trusted-app-tests-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        defaults = TestDefaults.suite(named: suiteName)
         storage = InMemoryClientRecordStorage()
     }
 

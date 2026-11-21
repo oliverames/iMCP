@@ -90,7 +90,7 @@ final class CalendarSelectionTests: XCTestCase {
 
     func testStorePersistsTheSelection() throws {
         let suite = "CalendarSelectionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let store = CalendarSelectionStore(defaults: defaults)
@@ -113,7 +113,7 @@ final class CalendarSelectionTests: XCTestCase {
 
     func testCorruptStoredSelectionFailsClosed() throws {
         let suite = "CalendarSelectionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         defaults.set(Data("{not valid json".utf8), forKey: CalendarSelectionStore.key)
@@ -125,7 +125,7 @@ final class CalendarSelectionTests: XCTestCase {
     /// A stored value with none of the known keys is corrupt, not a first run.
     func testUnknownKeysFailClosed() throws {
         let suite = "CalendarSelectionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         defaults.set(Data(#"{"calendars":42}"#.utf8), forKey: CalendarSelectionStore.key)
@@ -137,7 +137,7 @@ final class CalendarSelectionTests: XCTestCase {
     /// A stored value of the wrong type is corrupt, not a first run.
     func testWrongStoredTypeFailsClosed() throws {
         let suite = "CalendarSelectionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         defaults.set("not data", forKey: CalendarSelectionStore.key)
@@ -149,7 +149,7 @@ final class CalendarSelectionTests: XCTestCase {
     /// Only a missing key gets the first-run default.
     func testMissingKeySharesEverything() throws {
         let suite = "CalendarSelectionTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let store = CalendarSelectionStore(defaults: defaults)

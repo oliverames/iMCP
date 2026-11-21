@@ -69,7 +69,7 @@ final class CloudflareTokenCheckTests: XCTestCase {
     @MainActor
     func testTokenSignInStoresOnlyInTheInjectedStorageAndCanBeRemoved() async throws {
         let suite = "imcp-cf-token-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
+        let defaults = TestDefaults.suite(named: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let storage = InMemoryCloudflareSecretStorage()
         let controller = CloudflareTunnelController(

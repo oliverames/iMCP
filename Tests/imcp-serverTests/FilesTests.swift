@@ -196,7 +196,7 @@ final class FilesTests: XCTestCase {
 
     func testTheStoreRefusesToShareAPhotosLibrary() throws {
         let suite = "imcp-files-tests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = FilesRootStore(defaults: defaults)
 
@@ -608,7 +608,7 @@ final class FilesTests: XCTestCase {
 
         // The service starts with writes off, so its write tools aren't listed until the person allows them.
         let suite = "imcp-files-tests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         XCTAssertFalse(FilesService.shared.writesEnabledByDefault)
         XCTAssertFalse(FilesService.shared.areWritesEnabled(defaults: defaults))
@@ -650,7 +650,7 @@ final class FilesTests: XCTestCase {
     /// as a client does: every result is read back from the disk or through another tool.
     func testToolsReadWriteAndMoveThroughTheBookmarkStore() async throws {
         let suite = "imcp-files-tests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = FilesRootStore(defaults: defaults)
         let grant = try store.add(shared)

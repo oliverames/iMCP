@@ -899,7 +899,7 @@ final class MessagesTests: XCTestCase {
 
     private func writesDefaults(enabled: Bool?) throws -> UserDefaults {
         let name = "MessagesTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: name))
         addTeardownBlock { defaults.removePersistentDomain(forName: name) }
         if let enabled {
             ServiceWrites.setEnabled(enabled, serviceID: "MessageService", defaults: defaults)

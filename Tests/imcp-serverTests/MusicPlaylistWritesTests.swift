@@ -11,7 +11,7 @@ final class MusicPlaylistWritesTests: XCTestCase {
     override func setUp() {
         super.setUp()
         suiteName = "MusicPlaylistWritesTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        defaults = TestDefaults.suite(named: suiteName)
     }
 
     override func tearDown() {

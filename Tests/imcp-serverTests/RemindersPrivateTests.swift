@@ -24,14 +24,14 @@ final class RemindersPrivateTests: XCTestCase {
     // MARK: - Setting and gate
 
     func testSettingIsOffUntilChosen() {
-        let defaults = UserDefaults(suiteName: "RemindersPrivateTests.\(UUID().uuidString)")!
+        let defaults = TestDefaults.suite(named: "RemindersPrivateTests.\(UUID().uuidString)")!
         XCTAssertFalse(RemindersPrivate.isEnabled(defaults: defaults))
         defaults.set(true, forKey: RemindersPrivate.settingKey)
         XCTAssertTrue(RemindersPrivate.isEnabled(defaults: defaults))
     }
 
     func testRunRefusesWhileSettingIsOff() async {
-        let defaults = UserDefaults(suiteName: "RemindersPrivateTests.\(UUID().uuidString)")!
+        let defaults = TestDefaults.suite(named: "RemindersPrivateTests.\(UUID().uuidString)")!
         do {
             _ = try await RemindersPrivate.run(
                 tool: "reminders_flag",
@@ -45,7 +45,7 @@ final class RemindersPrivateTests: XCTestCase {
     }
 
     func testRunValidatesBeforeCallingTheBridge() async {
-        let defaults = UserDefaults(suiteName: "RemindersPrivateTests.\(UUID().uuidString)")!
+        let defaults = TestDefaults.suite(named: "RemindersPrivateTests.\(UUID().uuidString)")!
         defaults.set(true, forKey: RemindersPrivate.settingKey)
         do {
             _ = try await RemindersPrivate.run(tool: "reminders_flag", arguments: ["id": "nope"], defaults: defaults)
@@ -81,7 +81,7 @@ final class RemindersPrivateTests: XCTestCase {
 
     private func defaults(disabling gates: Set<String>) throws -> UserDefaults {
         let suite = "RemindersPrivateTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defaults.set(true, forKey: RemindersPrivate.settingKey)
         if !gates.isEmpty {
             defaults.set(try JSONEncoder().encode(gates), forKey: "disabledTools")

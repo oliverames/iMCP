@@ -13,7 +13,7 @@ final class UnattendedTests: XCTestCase {
 
     override func setUp() {
         suiteName = "imcp-unattended-tests-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        defaults = TestDefaults.suite(named: suiteName)
     }
 
     override func tearDown() {

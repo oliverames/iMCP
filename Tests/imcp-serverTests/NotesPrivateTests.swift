@@ -17,7 +17,7 @@ final class NotesPrivateTests: XCTestCase {
     }
 
     private func suite() -> UserDefaults {
-        UserDefaults(suiteName: "NotesPrivateTests.\(UUID().uuidString)")!
+        TestDefaults.suite(named: "NotesPrivateTests.\(UUID().uuidString)")!
     }
 
     // MARK: Gates

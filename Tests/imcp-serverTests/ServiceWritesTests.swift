@@ -10,7 +10,7 @@ final class ServiceWritesTests: XCTestCase {
     override func setUp() {
         super.setUp()
         suiteName = "ServiceWritesTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        defaults = TestDefaults.suite(named: suiteName)
     }
 
     override func tearDown() {

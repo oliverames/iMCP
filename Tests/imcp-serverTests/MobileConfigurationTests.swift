@@ -196,7 +196,7 @@ final class MobileConfigurationTests: XCTestCase {
 
     private func makeDefaults() -> UserDefaults {
         let name = "MobileConfigurationTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
+        let defaults = TestDefaults.suite(named: name)!
         addTeardownBlock { defaults.removePersistentDomain(forName: name) }
         return defaults
     }
@@ -242,7 +242,7 @@ final class MobileConfigurationDeliveryTests: XCTestCase {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         suite = "MobileConfigurationDeliveryTests.\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suite)
+        defaults = TestDefaults.suite(named: suite)
         // A fixed host keeps the test off the machine's real Tailscale interface.
         defaults.set("mac.tail.ts.net", forKey: MobileService.tailscaleHostOverrideKey)
         pairings = MobileMemoryPairings()

@@ -161,7 +161,7 @@ final class RemoteApprovalTests: XCTestCase {
 
     func testMobileListenerEnablesForPairedDeviceWhenApprovalsAreEnabled() throws {
         let suite = "RemoteApprovalTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         // Health and Alarms are off, approveOnIPhone is unset (defaults to true).

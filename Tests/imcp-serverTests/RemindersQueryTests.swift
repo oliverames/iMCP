@@ -420,7 +420,7 @@ final class RemindersQueryTests: XCTestCase {
 
     func testDeleteBatchRespectsDisabledRemindersDelete() throws {
         let suite = "RemindersQueryTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         XCTAssertFalse(RemindersQuery.isDeleteDisabled(defaults: defaults))

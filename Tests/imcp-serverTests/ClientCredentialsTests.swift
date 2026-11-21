@@ -13,7 +13,7 @@ final class ClientCredentialsTests: XCTestCase {
 
     override func setUp() async throws {
         suiteName = "imcp-credential-tests-\(UUID().uuidString)"
-        defaults = UserDefaults(suiteName: suiteName)
+        defaults = TestDefaults.suite(named: suiteName)
         storage = InMemoryClientRecordStorage()
     }
 

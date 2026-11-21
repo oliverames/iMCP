@@ -157,7 +157,7 @@ final class AccessTokenTests: XCTestCase {
 
     func testStoreFindsTokensBySecretAndPersists() throws {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         defer { defaults.removePersistentDomain(forName: suite) }
 
@@ -185,7 +185,7 @@ final class AccessTokenTests: XCTestCase {
 
     func testRerollReplacesSecretAndKeepsSettings() throws {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         defer { defaults.removePersistentDomain(forName: suite) }
 
@@ -214,7 +214,7 @@ final class AccessTokenTests: XCTestCase {
 
     func testDiscardsLegacyTokensWithoutMigration() throws {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         defer { defaults.removePersistentDomain(forName: suite) }
         let data = Data(
@@ -231,7 +231,7 @@ final class AccessTokenTests: XCTestCase {
 
     func testConcurrentBindingPersistsOnlyOneNode() async throws {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = AccessTokenStore(storage: storage, defaults: defaults)
@@ -263,7 +263,7 @@ final class AccessTokenTests: XCTestCase {
 
     func testStaleTokenCannotBindAfterRerollOrDeletion() throws {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         defer { defaults.removePersistentDomain(forName: suite) }
         let store = AccessTokenStore(storage: storage, defaults: defaults)
@@ -281,7 +281,7 @@ final class AccessTokenTests: XCTestCase {
 final class AccessTokenStorageFailureTests: XCTestCase {
     private func makeStore(_ storage: FailingAccessTokenStorage) throws -> AccessTokenStore {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return AccessTokenStore(storage: storage, defaults: defaults)
     }
@@ -437,7 +437,7 @@ final class RemoteAccessBindingTests: XCTestCase {
 
     private func makeStore() throws -> AccessTokenStore {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         return AccessTokenStore(storage: storage, defaults: defaults)
@@ -1561,7 +1561,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
 
     private func makeStore(publicAccess: Bool = false) throws -> (AccessTokenStore, String) {
         let suite = "RemoteAccessTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         let storage = InMemoryAccessTokenStorage()
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let store = AccessTokenStore(storage: storage, defaults: defaults)
@@ -2170,7 +2170,7 @@ final class CloudflareTunnelTests: XCTestCase {
     @MainActor
     func testControllerLoginProvisionConnectAndDisconnect() async throws {
         let suite = "CloudflareTests.\(UUID())"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
 
         let recorder = MockCloudflareTransport { request in

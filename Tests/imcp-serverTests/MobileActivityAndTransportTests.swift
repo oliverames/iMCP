@@ -535,7 +535,7 @@ final class MobileActivityAndTransportTests: XCTestCase {
 
     func testDevBootstrapDefaultsAndCertSeedingRespectsExistingSettings() throws {
         let suiteName = "DevBootstrapTests-\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        let defaults = try XCTUnwrap(TestDefaults.suite(named: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let certURL = directory.appendingPathComponent("cloudflared/cert.pem")
