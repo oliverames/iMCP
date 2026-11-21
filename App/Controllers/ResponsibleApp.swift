@@ -50,12 +50,18 @@ struct ResponsibleApp: Equatable, Sendable {
     var isAdHocSigned: Bool
     /// The code to check trusted requirements against.
     var code: CodeReference?
+    /// Whether `imcp-server`'s direct parent is the app's own main executable or a helper
+    /// inside its bundle with the same signer. Anything else between the app and
+    /// `imcp-server` (an interpreter, a script host, a differently signed binary)
+    /// could run code that the app's signature doesn't vouch for.
+    var hasTrustedParent: Bool = true
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.name == rhs.name && lhs.bundleIdentifier == rhs.bundleIdentifier
             && lhs.bundlePath == rhs.bundlePath && lhs.teamIdentifier == rhs.teamIdentifier
             && lhs.teamName == rhs.teamName && lhs.requirement == rhs.requirement
             && lhs.isAppleSigned == rhs.isAppleSigned && lhs.isAdHocSigned == rhs.isAdHocSigned
+            && lhs.hasTrustedParent == rhs.hasTrustedParent
     }
 
     /// Apps that run whatever the person types or scripts,
@@ -79,7 +85,7 @@ struct ResponsibleApp: Equatable, Sendable {
     /// An app that is unsigned, signed ad hoc, not an app bundle,
     /// or a terminal can't be trusted this way.
     var isTrustableBySignature: Bool {
-        guard requirement != nil, bundlePath != nil, !isAdHocSigned,
+        guard requirement != nil, bundlePath != nil, !isAdHocSigned, hasTrustedParent,
             teamIdentifier != nil || isAppleSigned
         else { return false }
         if let bundleIdentifier, Self.shellHostBundleIdentifiers.contains(bundleIdentifier) { return false }
@@ -141,6 +147,110 @@ struct ResponsibleApp: Equatable, Sendable {
         return (pid_t(bsd.pbi_ppid), name)
     }
 
+    // MARK: - Direct parent policy
+
+    /// The signature facts about a process, read from the running code.
+    struct ProcessSigner: Equatable, Sendable {
+        var isValid: Bool
+        var teamIdentifier: String?
+        var isAppleSigned: Bool
+    }
+
+    /// The process-tree and signature lookups that the parent policy needs.
+    /// Tests replace them with a fake tree.
+    struct ProcessLookup {
+        var parentPID: (pid_t) -> pid_t?
+        var executablePath: (pid_t) -> String?
+        var signer: (pid_t) -> ProcessSigner?
+        /// The path of the main executable of the bundle at a path.
+        var mainExecutable: (String) -> String?
+
+        static let system = ProcessLookup(
+            parentPID: { processParentAndName($0)?.ppid },
+            executablePath: processExecutablePath,
+            signer: processSigner,
+            mainExecutable: { Bundle(path: $0)?.executablePath.map(canonical) }
+        )
+    }
+
+    /// Interpreters and script hosts. Even inside a bundle, one of these runs
+    /// whatever script it's given, so it never gets the app's trust.
+    static let interpreterProcessNames: Set<String> = [
+        "node", "nodejs", "python", "python3", "ruby", "perl", "php", "deno", "bun", "java",
+        "lua", "osascript", "automator", "shortcuts", "wish", "tclsh", "swift", "npx", "uv",
+    ]
+
+    /// Whether `imcp-server`'s direct parent may carry the app's trust:
+    /// the app's own main executable, or the executable of a helper app nested in its
+    /// bundle that is validly signed by the same team. Any other parent
+    /// falls back to the approval dialog.
+    static func hasTrustedParent(
+        of child: pid_t,
+        for app: ResponsibleApp,
+        responsible: pid_t,
+        lookup: ProcessLookup = .system
+    ) -> Bool {
+        guard let bundlePath = app.bundlePath,
+            let parent = lookup.parentPID(child), parent > 1,
+            let rawPath = lookup.executablePath(parent)
+        else { return false }
+        let path = canonical(rawPath)
+        let bundle = canonical(bundlePath)
+        let name = (path as NSString).lastPathComponent.lowercased()
+        guard !shellProcessNames.contains(name), !interpreterProcessNames.contains(name) else { return false }
+
+        if parent == responsible {
+            return lookup.mainExecutable(bundle).map(canonical) == path
+        }
+        guard path.hasPrefix(bundle + "/Contents/") else { return false }
+        // The executable must sit in a helper app nested in the bundle,
+        // not loose among the bundle's resources or frameworks.
+        let relative = path.dropFirst(bundle.count + 1)
+        let components = relative.split(separator: "/").dropLast()
+        guard components.contains(where: { $0.hasSuffix(".app") }) else { return false }
+        guard let signer = lookup.signer(parent), signer.isValid else { return false }
+        if app.isAppleSigned { return signer.isAppleSigned }
+        guard let team = app.teamIdentifier else { return false }
+        return signer.teamIdentifier == team
+    }
+
+    private static func canonical(_ path: String) -> String {
+        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    private static func processExecutablePath(_ pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return String(cString: buffer)
+    }
+
+    private static func processSigner(_ pid: pid_t) -> ProcessSigner? {
+        let attributes: [CFString: Any] = [kSecGuestAttributePid: pid]
+        var guest: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, attributes as CFDictionary, [], &guest) == errSecSuccess,
+            let guest
+        else { return nil }
+        guard SecCodeCheckValidity(guest, [], nil) == errSecSuccess else {
+            return ProcessSigner(isValid: false, teamIdentifier: nil, isAppleSigned: false)
+        }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(guest, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var info: CFDictionary?
+        guard
+            SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &info)
+                == errSecSuccess,
+            let info = info as? [String: Any]
+        else { return nil }
+        var apple: SecRequirement?
+        SecRequirementCreateWithString("anchor apple" as CFString, [], &apple)
+        let isApple = apple.map { SecCodeCheckValidity(guest, [], $0) == errSecSuccess } ?? false
+        return ProcessSigner(
+            isValid: true,
+            teamIdentifier: info[kSecCodeInfoTeamIdentifier as String] as? String,
+            isAppleSigned: isApple
+        )
+    }
+
     // MARK: - Resolving
 
     /// Returns the app responsible for process `pid`, or `nil` if there is none to identify.
@@ -168,7 +278,16 @@ struct ResponsibleApp: Equatable, Sendable {
         guard SecCodeCheckValidity(guest, [], nil) == errSecSuccess else { return nil }
         var staticCode: SecStaticCode?
         guard SecCodeCopyStaticCode(guest, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
-        return ResponsibleApp(staticCode: staticCode, reference: CodeReference(running: guest))
+        guard var app = ResponsibleApp(staticCode: staticCode, reference: CodeReference(running: guest)) else {
+            return nil
+        }
+        app.hasTrustedParent = hasTrustedParent(of: pid, for: app, responsible: responsible)
+        if !app.hasTrustedParent {
+            Logger.server.notice(
+                "Parent of \(pid) isn't the main executable or a same-team helper of \(app.name); asking instead of trusting its signature"
+            )
+        }
+        return app
     }
 
     /// Reads the app at `url`, for tests and settings.

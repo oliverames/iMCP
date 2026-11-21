@@ -228,6 +228,113 @@ final class TrustedAppTests: XCTestCase {
         )
     }
 
+    // MARK: - Direct parent policy
+
+    private let bundle = "/Applications/Acme.app"
+
+    private func acmeApp() -> ResponsibleApp {
+        ResponsibleApp(
+            name: "Acme",
+            bundleIdentifier: "com.acme.app",
+            bundlePath: bundle,
+            teamIdentifier: "TEAM1",
+            teamName: "Acme",
+            requirement: "identifier \"com.acme.app\"",
+            isAppleSigned: false,
+            isAdHocSigned: false,
+            code: nil
+        )
+    }
+
+    /// A fake tree: `imcp-server` is pid 300 and its parent is `parent`.
+    private func parentLookup(
+        parent: pid_t = 200,
+        path: String,
+        signer: ResponsibleApp.ProcessSigner? = nil
+    ) -> ResponsibleApp.ProcessLookup {
+        ResponsibleApp.ProcessLookup(
+            parentPID: { $0 == 300 ? parent : 100 },
+            executablePath: { $0 == parent ? path : nil },
+            signer: { $0 == parent ? signer : nil },
+            mainExecutable: { $0 == "/Applications/Acme.app" ? "/Applications/Acme.app/Contents/MacOS/Acme" : nil }
+        )
+    }
+
+    private let sameTeam = ResponsibleApp.ProcessSigner(isValid: true, teamIdentifier: "TEAM1", isAppleSigned: false)
+    private let helperPath = "/Applications/Acme.app/Contents/Frameworks/Acme Helper.app/Contents/MacOS/Acme Helper"
+
+    func testDirectChildOfMainExecutableIsTrusted() {
+        let lookup = parentLookup(parent: 100, path: "/Applications/Acme.app/Contents/MacOS/Acme")
+        XCTAssertTrue(ResponsibleApp.hasTrustedParent(of: 300, for: acmeApp(), responsible: 100, lookup: lookup))
+    }
+
+    func testResponsibleProcessThatIsNotTheMainExecutableIsNotTrusted() {
+        let lookup = parentLookup(parent: 100, path: "/Applications/Acme.app/Contents/Resources/tool")
+        XCTAssertFalse(ResponsibleApp.hasTrustedParent(of: 300, for: acmeApp(), responsible: 100, lookup: lookup))
+    }
+
+    func testChildOfSameTeamBundledHelperIsTrusted() {
+        let lookup = parentLookup(path: helperPath, signer: sameTeam)
+        XCTAssertTrue(ResponsibleApp.hasTrustedParent(of: 300, for: acmeApp(), responsible: 100, lookup: lookup))
+    }
+
+    func testBundledHelperWithOtherTeamOrBadSignatureIsNotTrusted() {
+        for signer in [
+            ResponsibleApp.ProcessSigner(isValid: true, teamIdentifier: "OTHER", isAppleSigned: false),
+            ResponsibleApp.ProcessSigner(isValid: true, teamIdentifier: nil, isAppleSigned: false),
+            ResponsibleApp.ProcessSigner(isValid: false, teamIdentifier: "TEAM1", isAppleSigned: false),
+            nil,
+        ] {
+            let lookup = parentLookup(path: helperPath, signer: signer)
+            XCTAssertFalse(ResponsibleApp.hasTrustedParent(of: 300, for: acmeApp(), responsible: 100, lookup: lookup))
+        }
+    }
+
+    func testInterpreterParentIsNotTrustedInsideOrOutsideTheBundle() {
+        for path in [
+            "/usr/local/bin/node", "/opt/homebrew/bin/python3", "/usr/bin/ruby",
+            "/Applications/Acme.app/Contents/Resources/node",
+            "/Applications/Acme.app/Contents/Frameworks/Acme Helper.app/Contents/MacOS/node",
+            "/Applications/Acme.app/Contents/Frameworks/Acme Helper.app/Contents/MacOS/python3",
+        ] {
+            let lookup = parentLookup(path: path, signer: sameTeam)
+            XCTAssertFalse(
+                ResponsibleApp.hasTrustedParent(of: 300, for: acmeApp(), responsible: 100, lookup: lookup),
+                path
+            )
+        }
+    }
+
+    func testRenamedShellWithoutMatchingSignatureIsNotTrusted() {
+        // The names aren't known shells, so only the location and signature can reject them.
+        let other = ResponsibleApp.ProcessSigner(isValid: true, teamIdentifier: "OTHER", isAppleSigned: false)
+        let apple = ResponsibleApp.ProcessSigner(isValid: true, teamIdentifier: nil, isAppleSigned: true)
+        for (path, signer) in [
+            ("/tmp/totally-not-a-shell", other),
+            ("/tmp/Acme", sameTeam),
+            ("/bin/zsh", apple),
+            ("/Applications/Acme.app/Contents/Resources/renamed-shell", sameTeam),
+        ] {
+            let lookup = parentLookup(path: path, signer: signer)
+            XCTAssertFalse(
+                ResponsibleApp.hasTrustedParent(of: 300, for: acmeApp(), responsible: 100, lookup: lookup),
+                path
+            )
+        }
+    }
+
+    func testUntrustedParentFallsBackToTheDialogAndIsNotOfferedSignatureTrust() throws {
+        let store = makeStore()
+        var calculator = try app(at: calculatorURL)
+        try store.trustApp(calculator)
+        calculator.hasTrustedParent = false
+        XCTAssertFalse(calculator.isTrustableBySignature)
+        guard case .ask(let request) = store.evaluate(credential: nil, claimedName: "calc", app: calculator) else {
+            return XCTFail("A trusted app behind an untrusted parent must ask, not refuse or approve")
+        }
+        XCTAssertNotEqual(request.offer, .signature)
+    }
+
     // MARK: - Claude Code settings
 
     func testUpsertKeepsOtherSettingsAndReplacesTheIMCPEntry() throws {

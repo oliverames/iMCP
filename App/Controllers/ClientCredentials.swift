@@ -554,7 +554,7 @@ final class ClientCredentialStore {
 
     /// The trusted record whose requirement `app` satisfies, if any.
     func trustedAppRecord(matching app: ResponsibleApp) -> ClientRecord? {
-        guard let code = app.code else { return nil }
+        guard app.hasTrustedParent, let code = app.code else { return nil }
         return records.values.first { record in
             guard record.isTrusted, let requirement = record.requirement else { return false }
             return code.satisfies(requirement)
