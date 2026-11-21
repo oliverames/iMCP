@@ -1,5 +1,15 @@
 # Worklog
 
+## 2026-11-20 - Second review of the upstream PRs, fork ports, and outreach to Mattt
+
+**What changed**: Re-reviewed every open upstream PR and fixed what turned up, then updated each PR body and posted a comment tagging Mattt: #393 versions the CI cache key (Xcode 26.0 and 26.0.1 share build 17A400, so the bad archives kept restoring); #377 reports a cancelled confirmation as cancelled; #378 clamps stored alarms without trapping and resets the batch-delete store after a failed delete; #384 caps `scanLimit` by the budget, dedups unreadable IDs, returns a database `identifier` from create (`scriptIdentifier` for the scripting id), balances link parentheses; #385 refuses a long-s Photos library spelling and keeps tags, mode and name on replace with a new modification date; #391 re-checks pairing in `accept` and quarantines an unreadable old outbox; #392 sets `ASSETCATALOG_COMPILER_APPICON_NAME`. #384 and #385 are rebased onto the current #377. CI passes on #377, #378, #384, #385 and #393. Posted a review of Mattt's #308 (pre-auth connection and buffer exhaustion, global session cap, Host only checked when present, uncached whois failures), a #364 update with split offers for #378 and #384 and a TopoText testing offer, and a #305 note on how #390's helper fits his branch. Ported the Reminders, Files, Notes and confirmation fixes to fork main (`0bc19ea`, `3629176`, `f69e757`, `56cea32`). Tests no longer leave plists in `~/Library/Preferences` (`dfb55c2`, `0aa4ce3`; 6,231 old ones moved to the Trash). Fork CI green on `0aa4ce3`.
+
+**Decisions made**: The #308 review, #364 update and #305 note were posted with Oliver's approval. Mattt took only #382's alert wording; the custom menu panel waits for his #316 wizard. The menu's accessibility changes (real buttons, system background, semantic fonts, standard About panel) can be offered separately; not yet offered.
+
+**Left off at**: Waiting on Mattt. Open question for Oliver: whether to offer the small menu accessibility PR in #364 now. Fork-only follow-up: `NotesOrganizeTools` still returns scripting ids as `identifier` for move, rename and similar tools.
+
+---
+
 ## 2026-11-20 - Review of upstream PRs, fork-only features and fork bugs
 
 **What changed**: Reviewed every upstream PR, Mattt's comments, CI, the worklogs and the fork-only code, asked Oliver about each fork-only feature (plan recorded in `AGENTS.md`, `1b70789`), and fixed what the review found. All on `main`, CI green (run 44849951879), `imcp-serverTests` 826 passed, iMCP app builds.
