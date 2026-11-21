@@ -1,5 +1,22 @@
 # Worklog
 
+## 2026-11-20 - Review of upstream PRs, fork-only features and fork bugs
+
+**What changed**: Fork CI was red on every `main` run because the project compiles the gitignored `GeneratedBootstrapSecrets.swift`; CI now writes the empty fallback first (`47a656c`, first green run 44843370371). The Notes Markdown converter never closed a `<head>` skip, so text after a `<head>` was dropped (`c2527bf`, with a test).
+
+**Findings not yet fixed** (from a read-only review; verified by reading code, not by running it):
+- DevBootstrap and its secrets compile into every configuration; `IMCP_OMIT_BOOTSTRAP` is set nowhere. A locally built Release app or TestFlight IPA carries the device PSK, Cloudflare tunnel token and cert PEM, and forces services, writes, remote access and Unattended on.
+- The #391 outbox migration and liveness fixes are on `pr/ios-outbox-liveness` only, not on fork `main` (`MobileOutbox.swift:78`, `Mobile.swift` `answers(within:)` and `attach`).
+- `CloudflareTunnel.configureTunnelIngress`: `try?` on the GET turns any error into "no rules", so the PUT wipes an adopted tunnel's ingress; `IngressRule` drops `path` and `originRequest` on re-PUT (Mattt's #376 point, still partial).
+- Trust by signature (Mattt's #374 point) is partial: only shells are refused as intermediaries.
+- Private Reminders tools are not gated by the per-tool switches (`reminders_update`, `reminders_lists_*`, `reminders_create`).
+- `notes_append` rewrites the whole body and drops checklist state, tags and tables; NotesSharedBridge leaves the context dirty after a failed write; `notes_add_attachment`/`notes_save_attachment` take any absolute path.
+- Public endpoint: pre-auth 64 MiB WebSocket frames; global `/authorize` and `/register` limiters and anonymous approval dialogs let anyone block OAuth onboarding.
+
+**Left off at**: Questions to Oliver on each fork-only feature and on which findings to fix.
+
+---
+
 ## 2026-11-20 - Wrapped up the upstream/fork session
 
 **What changed**: Rewrote the session's pull request replies in Oliver's voice and tagged `@mattt` on every comment of his across `mattt/iMCP` (#364, #373, #377, #378, #380, #384, #385, #387, #390, #391, #392), #317 and `mattt/TopoText#4`, including seven older comments that had drifted in without the tag. The Home paragraph in the README now describes the bundled XPC helper and no longer suggests showing the helper's window (`76eb6f8`). `AGENTS.md` gained a "What stays on the fork" inventory: the private APIs, Notes editing, Safari, Music playlist writes, Cloudflare Tunnel, Funnel, OAuth, Tailscale remote access, the iOS app and mobile approvals, the custom menu bar panel, the bundled XPC Home helper, trust by code signature, the Unattended switch, and the dev bootstrap and local config.
