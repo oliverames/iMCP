@@ -23,6 +23,8 @@ enum FunnelPolicy {
     static let maximumConnections = 16
     /// How long a connection can wait for the next request.
     static let idleTimeout: Duration = .seconds(60)
+    /// How long a new connection can wait for its first request. A client that has a request sends it at once.
+    static let firstRequestTimeout: Duration = .seconds(10)
     /// How long a request can take to arrive, from its first byte.
     static let requestDeadline: Duration = .seconds(15)
 
@@ -127,6 +129,9 @@ enum FunnelPolicy {
         if let grant = bearerToken(in: authorizationField).flatMap(oauthLookup) {
             return .allowedOAuth(grant)
         }
+        // A request without credentials is the first step of OAuth discovery: it gets the 401 challenge
+        // and doesn't count as a failure, so anonymous traffic can't turn the challenge into a 429.
+        guard authorizationField != nil else { return .unauthorized }
         if let retryAfter = limiter.retryAfter(now: now) {
             return .rateLimited(retryAfter: retryAfter)
         }
@@ -151,7 +156,8 @@ enum FunnelPolicy {
 
 /// Counts requests with bad tokens, and blocks more of them for a while after too many.
 ///
-/// Funnel hides the sender's address, so the count covers all senders together.
+/// Funnel hides the sender's address, so the count covers all senders together there.
+/// Where the sender's address is known, ``KeyedAuthLimiter`` keeps one count per address.
 /// Blocking only changes the answer to a request that has no good token,
 /// so it can't keep the owner out.
 struct FailedAuthLimiter: Equatable, Sendable {
@@ -181,6 +187,67 @@ struct FailedAuthLimiter: Equatable, Sendable {
     func retryAfter(now: Date = Date()) -> Int? {
         guard let blockedUntil, blockedUntil > now else { return nil }
         return max(1, Int(blockedUntil.timeIntervalSince(now).rounded(.up)))
+    }
+
+    /// Whether the limiter holds nothing that still matters at `now`.
+    func isIdle(now: Date = Date()) -> Bool {
+        retryAfter(now: now) == nil && failures.allSatisfy { now.timeIntervalSince($0) >= window }
+    }
+}
+
+/// One ``FailedAuthLimiter`` per sender address, so that one sender's junk traffic
+/// can't block the others. Senders whose address is unknown share the key `""`.
+/// The table has a fixed size: past it, new senders share one overflow count.
+struct KeyedAuthLimiter: Sendable {
+    static let overflowKey = "*overflow"
+
+    private let template: FailedAuthLimiter
+    private let maximumKeys: Int
+    private var limiters: [String: FailedAuthLimiter] = [:]
+
+    init(
+        maximumFailures: Int = 10,
+        window: TimeInterval = 60,
+        blockDuration: TimeInterval = 60,
+        maximumKeys: Int = 1024
+    ) {
+        template = FailedAuthLimiter(maximumFailures: maximumFailures, window: window, blockDuration: blockDuration)
+        self.maximumKeys = maximumKeys
+    }
+
+    /// Runs `body` with the limiter for `key`, and keeps it if it still holds anything.
+    mutating func withLimiter<T>(
+        key: String,
+        now: Date = Date(),
+        _ body: (inout FailedAuthLimiter) -> T
+    ) -> T {
+        var key = key
+        if limiters[key] == nil, limiters.count >= maximumKeys {
+            limiters = limiters.filter { !$0.value.isIdle(now: now) }
+            if limiters.count >= maximumKeys { key = Self.overflowKey }
+        }
+        var limiter = limiters[key] ?? template
+        let result = body(&limiter)
+        if limiter.isIdle(now: now) { limiters.removeValue(forKey: key) } else { limiters[key] = limiter }
+        return result
+    }
+
+    /// The seconds until `key` may try again, or `nil` if it may now.
+    mutating func retryAfter(key: String, now: Date = Date()) -> Int? {
+        withLimiter(key: key, now: now) { $0.retryAfter(now: now) }
+    }
+
+    /// Counts a request from `key` and returns the seconds to wait if it made too many.
+    mutating func admit(key: String, now: Date = Date()) -> Int? {
+        withLimiter(key: key, now: now) { limiter in
+            if let wait = limiter.retryAfter(now: now) { return wait }
+            limiter.recordFailure(now: now)
+            return limiter.retryAfter(now: now)
+        }
+    }
+
+    mutating func recordFailure(key: String, now: Date = Date()) {
+        withLimiter(key: key, now: now) { $0.recordFailure(now: now) }
     }
 }
 

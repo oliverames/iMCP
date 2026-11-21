@@ -29,6 +29,8 @@ enum ServedResponse: Sendable {
 /// The caller checks the `Host` and `Origin` first, like it does for `/mcp`.
 final class OAuthEndpoints: @unchecked Sendable {
     typealias ApprovalHandler = @Sendable (OAuthApprovalRequest) async -> OAuthDecision
+    /// Closes the owner's prompt for a request that a newer one from the same app replaced.
+    typealias CancelHandler = @Sendable (String) -> Void
 
     static let protectedResourcePaths: Set<String> = [
         "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp",
@@ -50,6 +52,7 @@ final class OAuthEndpoints: @unchecked Sendable {
     private let pollWindow: Duration
     private let lock = NSLock()
     private var approve: ApprovalHandler?
+    private var cancel: CancelHandler?
 
     init(authority: OAuthAuthority, pollWindow: Duration = .seconds(15)) {
         self.authority = authority
@@ -61,16 +64,24 @@ final class OAuthEndpoints: @unchecked Sendable {
         lock.withLock { approve = handler }
     }
 
-    func handle(_ message: HTTPRequestMessage, host: String) async -> ServedResponse {
+    /// Sets how iMCP closes a prompt that a newer request from the same app replaced.
+    func setCancelHandler(_ handler: CancelHandler?) {
+        lock.withLock { cancel = handler }
+    }
+
+    /// - Parameter remote: The sender's address where it's known, or `""`.
+    ///   The rate limits and the denial cooldown count each sender on its own.
+    func handle(_ message: HTTPRequestMessage, host: String, remote: String = "") async -> ServedResponse {
         switch message.path {
         case let path where Self.protectedResourcePaths.contains(path):
             return get(message) { Self.json(200, Self.protectedResourceMetadata(host: host)) }
         case Self.authorizationServerPath:
             return get(message) { Self.json(200, Self.authorizationServerMetadata(host: host)) }
         case "/register":
-            return message.method == "POST" ? register(message) : methodNotAllowed("POST")
+            return message.method == "POST" ? register(message, remote: remote) : methodNotAllowed("POST")
         case "/authorize":
-            return message.method == "GET" ? await authorize(message, host: host) : methodNotAllowed("GET")
+            return message.method == "GET"
+                ? await authorize(message, host: host, remote: remote) : methodNotAllowed("GET")
         case "/token":
             return message.method == "POST" ? token(message, host: host) : methodNotAllowed("POST")
         default:
@@ -113,8 +124,8 @@ final class OAuthEndpoints: @unchecked Sendable {
 
     // MARK: Registration
 
-    private func register(_ message: HTTPRequestMessage) -> ServedResponse {
-        if let wait = authority.admitRegistration() { return tooManyRequests(wait, json: true) }
+    private func register(_ message: HTTPRequestMessage, remote: String) -> ServedResponse {
+        if let wait = authority.admitRegistration(remote: remote) { return tooManyRequests(wait, json: true) }
         guard let object = (try? JSONSerialization.jsonObject(with: message.body)) as? [String: Any],
             let uris = object["redirect_uris"] as? [String]
         else {
@@ -150,26 +161,26 @@ final class OAuthEndpoints: @unchecked Sendable {
                 extra: ["Cache-Control": "no-store"]
             )
         } catch let error as OAuthError {
-            return Self.registrationError(error.code, error.description)
+            return Self.registrationError(error.code, error.description, status: error.status)
         } catch {
             return Self.registrationError("invalid_client_metadata", "The registration isn't valid.")
         }
     }
 
-    private static func registrationError(_ code: String, _ description: String) -> ServedResponse {
-        json(400, ["error": code, "error_description": description], extra: ["Cache-Control": "no-store"])
+    private static func registrationError(_ code: String, _ description: String, status: Int = 400) -> ServedResponse {
+        json(status, ["error": code, "error_description": description], extra: ["Cache-Control": "no-store"])
     }
 
     // MARK: Authorization
 
-    private func authorize(_ message: HTTPRequestMessage, host: String) async -> ServedResponse {
+    private func authorize(_ message: HTTPRequestMessage, host: String, remote: String) async -> ServedResponse {
         guard let query = Self.parseForm(message.query) else {
             return Self.errorPage("The request repeats a parameter or isn't valid.")
         }
         if let pending = query["pending"] {
             return await continuePending(pending, cookie: message.header("Cookie"), host: host)
         }
-        if let wait = authority.admitAuthorization() { return tooManyRequests(wait, json: false) }
+        if let wait = authority.admitAuthorization(remote: remote) { return tooManyRequests(wait, json: false) }
         // Errors about the client or the redirect URI show a page, and never redirect,
         // because the redirect URI isn't trusted until it matches a registered one.
         guard let clientID = query["client_id"], let client = await authority.resolveClient(id: clientID) else {
@@ -196,15 +207,22 @@ final class OAuthEndpoints: @unchecked Sendable {
         guard let resource = OAuthAuthority.canonicalResource(query["resource"], host: host) else {
             return fail("invalid_target", "The resource isn't this server's MCP endpoint.")
         }
-        guard
-            let request = authority.beginPending(
-                client: client,
-                redirectURI: redirectURI,
-                state: state,
-                challenge: challenge,
-                resource: resource
-            )
-        else {
+        let request: OAuthApprovalRequest
+        switch authority.startPending(
+            client: client,
+            redirectURI: redirectURI,
+            state: state,
+            challenge: challenge,
+            resource: resource,
+            remote: remote
+        ) {
+        case .started(let started, let superseded):
+            request = started
+            if let cancel = lock.withLock({ cancel }) { superseded.forEach(cancel) }
+        case .coolingDown:
+            // The owner just denied this app, so don't ask again yet.
+            return fail("access_denied", "The owner didn't approve access.")
+        case .full:
             return Self.html(503, Self.page("Try again later", "Too many apps are waiting for approval."))
         }
         let handler = lock.withLock { approve }

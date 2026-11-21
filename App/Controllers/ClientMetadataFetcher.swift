@@ -24,11 +24,67 @@ enum ClientMetadataFetcher {
     /// Sends `request` to the address over TLS for `host`, and returns everything read until the connection closes.
     typealias Transport = @Sendable (_ host: String, _ address: [UInt8], _ request: Data) async throws -> Data
 
+    /// How long the whole fetch can take, from the name lookup to the last byte.
+    static let deadline: Duration = .seconds(8)
+
     static func fetch(_ url: URL) async throws -> Data {
-        try await fetch(url, resolve: resolveAddresses, transport: connectAndRead)
+        try await fetch(
+            url,
+            resolve: { try await resolveAddresses($0) },
+            transport: { try await connectAndRead(host: $0, address: $1, request: $2) }
+        )
     }
 
-    static func fetch(_ url: URL, resolve: Resolver, transport: Transport) async throws -> Data {
+    /// The name lookup runs under the same deadline as the connection: `getaddrinfo` can't be cancelled,
+    /// so the fetch stops waiting for it instead of waiting for it to give up.
+    static func fetch(
+        _ url: URL,
+        deadline: Duration = ClientMetadataFetcher.deadline,
+        resolve: @escaping Resolver,
+        transport: @escaping Transport
+    ) async throws -> Data {
+        try await withDeadline(deadline) {
+            try await fetchWithoutDeadline(url, resolve: resolve, transport: transport)
+        }
+    }
+
+    /// Returns the result of `operation`, or throws ``Refused`` when it takes longer than `timeout`.
+    /// The operation is cancelled at the deadline, but the caller doesn't wait for it to notice.
+    static func withDeadline<T: Sendable>(
+        _ timeout: Duration,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+            let once = Once(continuation)
+            let work = Task {
+                do { once.finish(.success(try await operation())) } catch { once.finish(.failure(error)) }
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                if once.finish(.failure(Refused())) { work.cancel() }
+            }
+        }
+    }
+
+    /// Resumes a continuation once, for whichever of two racing tasks finishes first.
+    private final class Once<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<T, Error>?
+
+        init(_ continuation: CheckedContinuation<T, Error>) { self.continuation = continuation }
+
+        @discardableResult
+        func finish(_ result: Result<T, Error>) -> Bool {
+            let pending = lock.withLock { () -> CheckedContinuation<T, Error>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            pending?.resume(with: result)
+            return pending != nil
+        }
+    }
+
+    private static func fetchWithoutDeadline(_ url: URL, resolve: Resolver, transport: Transport) async throws -> Data {
         guard url.scheme == "https", url.port == nil || url.port == 443, let host = url.host(), isPublicName(host)
         else { throw Refused() }
         let addresses = try await resolve(host)

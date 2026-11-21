@@ -734,6 +734,212 @@ final class OAuthTests: XCTestCase {
         } catch is ClientMetadataFetcher.Refused {}
     }
 
+    // MARK: Abuse limits
+
+    private func pendingRequest(
+        _ authority: OAuthAuthority,
+        _ client: OAuthClient,
+        remote: String = ""
+    ) -> OAuthAuthority.PendingStart {
+        authority.startPending(
+            client: client,
+            redirectURI: client.redirectURIs[0],
+            state: nil,
+            challenge: challenge,
+            resource: resource,
+            remote: remote
+        )
+    }
+
+    func testRegistrationAndAuthorizationLimitsCountEachSenderOnItsOwn() {
+        let authority = makeAuthority()
+        var wait: Int?
+        for _ in 0 ..< 25 { wait = authority.admitRegistration(remote: "v4:junk") }
+        XCTAssertNotNil(wait)
+        XCTAssertNil(authority.admitRegistration(remote: "v4:real"))
+        for _ in 0 ..< 12 { wait = authority.admitAuthorization(remote: "v4:junk") }
+        XCTAssertNotNil(wait)
+        XCTAssertNil(authority.admitAuthorization(remote: "v4:real"))
+        // Senders whose address is unknown still share one count.
+        for _ in 0 ..< 12 { wait = authority.admitAuthorization() }
+        XCTAssertNotNil(wait)
+        XCTAssertNotNil(authority.admitAuthorization())
+    }
+
+    func testKeyedLimiterForgetsIdleSendersAndBoundsItsTable() {
+        var limiter = KeyedAuthLimiter(maximumFailures: 2, window: 60, blockDuration: 60, maximumKeys: 3)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        for key in ["a", "b", "c"] { limiter.recordFailure(key: key, now: start) }
+        // The table is full of senders with a recent failure, so a new one shares the overflow count.
+        limiter.recordFailure(key: "d", now: start)
+        limiter.recordFailure(key: "e", now: start)
+        XCTAssertNotNil(limiter.retryAfter(key: KeyedAuthLimiter.overflowKey, now: start))
+        XCTAssertNil(limiter.retryAfter(key: "a", now: start))
+        // After the window passes, the old senders are dropped and a new one gets its own count.
+        let later = start.addingTimeInterval(200)
+        limiter.recordFailure(key: "f", now: later)
+        XCTAssertNil(limiter.retryAfter(key: "f", now: later))
+    }
+
+    func testRegistrationNeverEvictsAClientThatHasAGrant() async throws {
+        let authority = makeAuthority()
+        let connected = try register(authority)
+        _ = try exchange(authority, code: try issueCode(authority, client: connected), client: connected)
+        for _ in 1 ..< OAuthAuthority.maximumRegisteredClients { _ = try register(authority) }
+        // The table is full. The next registration drops an unused one, not the connected client.
+        _ = try register(authority)
+        _ = try register(authority)
+        let resolved = await authority.resolveClient(id: connected.id)
+        XCTAssertEqual(resolved?.id, connected.id)
+    }
+
+    func testRegistrationIsRefusedWhenEveryClientHasAGrant() throws {
+        let authority = makeAuthority()
+        for _ in 0 ..< OAuthAuthority.maximumRegisteredClients {
+            let client = try register(authority)
+            _ = try exchange(authority, code: try issueCode(authority, client: client), client: client)
+        }
+        XCTAssertThrowsError(try register(authority)) { error in
+            XCTAssertEqual((error as? OAuthError)?.status, 503)
+        }
+    }
+
+    func testDenialSilencesLaterRequestsFromTheSameAppAndSender() throws {
+        let clock = Clock()
+        let authority = makeAuthority(clock: clock)
+        let client = try register(authority)
+        guard case .started(let first, _) = pendingRequest(authority, client, remote: "v4:a") else {
+            return XCTFail("Expected a started request")
+        }
+        authority.setDecision(.denied, for: first.id)
+        XCTAssertEqual(pendingRequest(authority, client, remote: "v4:a"), .coolingDown)
+        // Another sender, or another app, still gets a prompt.
+        guard case .started = pendingRequest(authority, client, remote: "v4:b") else {
+            return XCTFail("Another sender should be asked")
+        }
+        let other = try register(authority)
+        guard case .started = pendingRequest(authority, other, remote: "v4:a") else {
+            return XCTFail("Another app should be asked")
+        }
+        clock.advance(OAuthAuthority.denialCooldown + 1)
+        guard case .started = pendingRequest(authority, client, remote: "v4:a") else {
+            return XCTFail("The cooldown should end")
+        }
+    }
+
+    func testNewRequestReplacesTheEarlierOneFromTheSameAppAndSender() throws {
+        let authority = makeAuthority()
+        let client = try register(authority)
+        guard case .started(let first, let none) = pendingRequest(authority, client, remote: "v4:a") else {
+            return XCTFail("Expected a started request")
+        }
+        XCTAssertTrue(none.isEmpty)
+        let firstSecret = authority.takePollSecret(forPending: first.id)
+        guard case .started(let second, let superseded) = pendingRequest(authority, client, remote: "v4:a") else {
+            return XCTFail("Expected a started request")
+        }
+        XCTAssertEqual(superseded, [first.id])
+        XCTAssertEqual(authority.outcome(ofPending: first.id, pollSecret: firstSecret), .unknown)
+        // Closing the replaced prompt isn't a denial, so the new request isn't silenced.
+        authority.setDecision(.denied, for: first.id)
+        let secondSecret = authority.takePollSecret(forPending: second.id)
+        XCTAssertEqual(authority.outcome(ofPending: second.id, pollSecret: secondSecret), .waiting)
+    }
+
+    func testOneSenderCannotFillTheWaitingList() throws {
+        let authority = makeAuthority()
+        var started = 0
+        for _ in 0 ..< OAuthAuthority.maximumPendingPerRemote + 3 {
+            let client = try register(authority)
+            if case .started = pendingRequest(authority, client, remote: "v4:junk") { started += 1 }
+        }
+        XCTAssertEqual(started, OAuthAuthority.maximumPendingPerRemote)
+        let real = try register(authority)
+        guard case .started = pendingRequest(authority, real, remote: "v4:real") else {
+            return XCTFail("Another sender should still get in")
+        }
+    }
+
+    func testAuthorizeAnswersAccessDeniedWithoutAskingAfterADenial() async throws {
+        let authority = makeAuthority()
+        let endpoints = OAuthEndpoints(authority: authority, pollWindow: .milliseconds(500))
+        let asked = LockedBox(0)
+        let canceled = LockedBox<[String]>([])
+        endpoints.setApprovalHandler { _ in
+            asked.value += 1
+            return .denied
+        }
+        endpoints.setCancelHandler { canceled.value.append($0) }
+        let client = try register(authority)
+        let query =
+            "response_type=code&client_id=\(client.id)&redirect_uri=\(OAuthEndpoints.formEncode(redirect))"
+            + "&code_challenge=\(challenge)&code_challenge_method=S256&state=z&resource=\(OAuthEndpoints.formEncode(resource))"
+        let waiting = await endpoints.handle(get("/authorize", query: query), host: host, remote: "v4:a")
+        XCTAssertEqual(waiting.statusCode, 200)
+        for _ in 0 ..< 100 where asked.value == 0 { try await Task.sleep(for: .milliseconds(10)) }
+        // Let the denial reach the authority.
+        try await Task.sleep(for: .milliseconds(100))
+
+        let again = await endpoints.handle(get("/authorize", query: query), host: host, remote: "v4:a")
+        XCTAssertEqual(again.statusCode, 302)
+        XCTAssertTrue(try XCTUnwrap(header(again, "Location")).contains("error=access_denied"))
+        XCTAssertEqual(asked.value, 1)
+
+        // A different sender still gets a prompt, and a retry from it closes its earlier prompt.
+        let other = await endpoints.handle(get("/authorize", query: query), host: host, remote: "v4:b")
+        XCTAssertEqual(other.statusCode, 200)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(asked.value, 2)
+    }
+
+    func testAuthorizeLimitDoesNotCountOtherSenders() async throws {
+        let authority = makeAuthority()
+        let endpoints = OAuthEndpoints(authority: authority)
+        var junkStatus = 0
+        for _ in 0 ..< 12 {
+            junkStatus = await endpoints.handle(get("/authorize", query: "client_id=x"), host: host, remote: "v4:junk")
+                .statusCode
+        }
+        XCTAssertEqual(junkStatus, 429)
+        let real = await endpoints.handle(get("/authorize", query: "client_id=x"), host: host, remote: "v4:real")
+        XCTAssertEqual(real.statusCode, 400)
+    }
+
+    func testMetadataFetchGivesUpWhenNameLookupHangs() async throws {
+        let url = try XCTUnwrap(URL(string: "https://app.example.com/meta.json"))
+        let started = ContinuousClock.now
+        do {
+            _ = try await ClientMetadataFetcher.fetch(
+                url,
+                deadline: .milliseconds(200),
+                resolve: { _ in
+                    // A lookup that ignores cancellation, like getaddrinfo.
+                    await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+                    return []
+                },
+                transport: { _, _, _ in Data() }
+            )
+            XCTFail("Expected a refusal")
+        } catch is ClientMetadataFetcher.Refused {}
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(5))
+    }
+
+    func testMetadataFetchDeadlineCoversASlowTransport() async throws {
+        let url = try XCTUnwrap(URL(string: "https://app.example.com/meta.json"))
+        do {
+            _ = try await ClientMetadataFetcher.fetch(
+                url,
+                deadline: .milliseconds(200),
+                resolve: { _ in [[8, 8, 8, 8]] },
+                transport: { _, _, _ in
+                    try await Task.sleep(for: .seconds(30))
+                    return Data()
+                }
+            )
+            XCTFail("Expected a refusal")
+        } catch is ClientMetadataFetcher.Refused {}
+    }
+
     // MARK: Helpers
 
     private func get(_ path: String, query: String = "", cookie: String? = nil) -> HTTPRequestMessage {

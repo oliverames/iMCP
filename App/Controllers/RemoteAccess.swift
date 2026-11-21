@@ -336,7 +336,8 @@ actor RemoteAccessServer {
     private var funnelRequested = false
     /// The request to turn Funnel on, while it's in flight.
     private var funnelEnableTask: Task<String, any Error>?
-    private var failedAuth = FailedAuthLimiter()
+    /// Failed token counts, one per sender address where it's known (Cloudflare), and shared where it isn't (Funnel).
+    private var failedAuth = KeyedAuthLimiter()
     private var peers: [String: (peer: TailnetPeer?, expires: Date)] = [:]
     private var sessions: [String: Session] = [:]
     /// Counts the times that every session closed,
@@ -385,6 +386,11 @@ actor RemoteAccessServer {
     /// Sets how iMCP asks its owner to approve an app that wants public access through OAuth.
     func setOAuthApprovalHandler(_ handler: OAuthEndpoints.ApprovalHandler?) {
         oauthEndpoints.setApprovalHandler(handler)
+    }
+
+    /// Sets how iMCP closes the owner's prompt for a request that a newer one from the same app replaced.
+    func setOAuthCancelHandler(_ handler: OAuthEndpoints.CancelHandler?) {
+        oauthEndpoints.setCancelHandler(handler)
     }
 
     /// Sets the handlers for iPhone/iPad connections over Tailscale VPN and public WebSockets.
@@ -672,7 +678,7 @@ actor RemoteAccessServer {
         for task in funnelConnections.values { task.cancel() }
         funnelListener?.shutdown()
         funnelListener = nil
-        failedAuth = FailedAuthLimiter()
+        failedAuth = KeyedAuthLimiter()
     }
 
     private func syncPublicLoopbackListener() async {
@@ -773,14 +779,20 @@ actor RemoteAccessServer {
             connection,
             limits: .publicInternet,
             idleTimeout: FunnelPolicy.idleTimeout,
+            firstRequestTimeout: FunnelPolicy.firstRequestTimeout,
             requestDeadline: FunnelPolicy.requestDeadline
         )
         funnelConnections[id] = Task {
             await http.serve(
                 { request in
-                    let response = await self.respondPublic(to: request)
+                    let (response, authenticated) = await self.servePublic(request)
                     Self.logPublicRequest(request, statusCode: response.statusCode)
-                    return (response, keepAlive: !FunnelPolicy.closesConnection(afterStatus: response.statusCode))
+                    // Only a caller with a good token keeps the connection open between requests.
+                    // Anonymous clients would otherwise hold the few public connection slots while they idle.
+                    return (
+                        response,
+                        keepAlive: authenticated && !FunnelPolicy.closesConnection(afterStatus: response.statusCode)
+                    )
                 },
                 onUpgrade: { message, rawConnection, leftover in
                     await self.handleFunnelMobileUpgrade(
@@ -1121,8 +1133,32 @@ actor RemoteAccessServer {
     /// or an OAuth access token issued for this endpoint.
     /// The `Host` and `Origin` must name an active public host for every path.
     func respondPublic(to message: HTTPRequestMessage) async -> ServedResponse {
+        await servePublic(message).response
+    }
+
+    /// The sender address that rate limits and denial cooldowns count, or `""` where it isn't known.
+    ///
+    /// Tailscale Funnel hides the sender, so every Funnel request shares one count.
+    /// Cloudflare sets `CF-Connecting-IP` on every request that it forwards, so the header is
+    /// trusted only on the Cloudflare host, where Cloudflare replaces whatever the sender wrote.
+    /// An IPv6 sender counts as its /64, because one subscriber holds a whole /64.
+    func senderAddress(of message: HTTPRequestMessage, matchedHost: String?) -> String {
+        guard let matchedHost, matchedHost == cloudflareHost, matchedHost != tailscaleFunnelHost,
+            let value = message.header("CF-Connecting-IP")?.trimmingCharacters(in: .whitespaces)
+        else { return "" }
+        var v4 = in_addr()
+        if inet_pton(AF_INET, value, &v4) == 1 { return "v4:" + String(UInt32(bigEndian: v4.s_addr), radix: 16) }
+        var v6 = in6_addr()
+        if inet_pton(AF_INET6, value, &v6) == 1 {
+            return "v6:" + withUnsafeBytes(of: v6) { $0.prefix(8).map { String(format: "%02x", $0) }.joined() }
+        }
+        return ""
+    }
+
+    /// Answers a public request, and says whether its caller presented a good token.
+    private func servePublic(_ message: HTTPRequestMessage) async -> (response: ServedResponse, authenticated: Bool) {
         let hosts = publicHosts
-        guard !hosts.isEmpty else { return .mcp(Self.unavailableResponse) }
+        guard !hosts.isEmpty else { return (.mcp(Self.unavailableResponse), false) }
         let validator = FunnelPolicy.originValidator(hosts: hosts)
         let request = MCP.HTTPRequest(
             method: message.method,
@@ -1141,27 +1177,31 @@ actor RemoteAccessServer {
             // A browser's top-level navigation and a server-side client send no `Origin`,
             // and a page on another site does, so the check stops cross-site requests from browsers.
             if let rejection = validator.validate(request, context: context) {
-                return .mcp(rejection)
+                return (.mcp(rejection), false)
             }
             guard let requestHost = FunnelPolicy.matchedHost(in: message.header("Host"), allowedHosts: hosts) else {
-                return .mcp(.error(statusCode: 421, .invalidRequest("Misdirected Request")))
+                return (.mcp(.error(statusCode: 421, .invalidRequest("Misdirected Request"))), false)
             }
-            return await oauthEndpoints.handle(message, host: requestHost)
+            let remote = senderAddress(of: message, matchedHost: requestHost)
+            return (await oauthEndpoints.handle(message, host: requestHost, remote: remote), false)
         }
 
         let requestHost = FunnelPolicy.matchedHost(in: message.header("Host"), allowedHosts: hosts)
         let challengeHost = requestHost ?? hosts.sorted().first!
         let resource = requestHost.map(FunnelPolicy.publicURL(host:))
         let oauth = oauthEndpoints.authority
-        let decision = FunnelPolicy.authorize(
-            authorizationField: message.header(HTTPHeaderName.authorization),
-            lookup: tokenStore.token(secret:),
-            oauthLookup: { token in
-                guard let resource else { return nil }
-                return oauth.authenticate(accessToken: token, resource: resource)
-            },
-            limiter: &failedAuth
-        )
+        let remote = senderAddress(of: message, matchedHost: requestHost)
+        let decision = failedAuth.withLimiter(key: remote) { limiter in
+            FunnelPolicy.authorize(
+                authorizationField: message.header(HTTPHeaderName.authorization),
+                lookup: tokenStore.token(secret:),
+                oauthLookup: { token in
+                    guard let resource else { return nil }
+                    return oauth.authenticate(accessToken: token, resource: resource)
+                },
+                limiter: &limiter
+            )
+        }
         let caller: Caller
         switch decision {
         case .allowed(let allowed):
@@ -1169,37 +1209,43 @@ actor RemoteAccessServer {
         case .allowedOAuth(let grant):
             caller = Caller(id: grant.id, name: grant.clientName, token: nil)
         case .unauthorized:
-            return .mcp(
-                Self.publicUnauthorizedResponse(
-                    host: challengeHost,
-                    presentedToken: message.header(HTTPHeaderName.authorization) != nil
-                )
+            return (
+                .mcp(
+                    Self.publicUnauthorizedResponse(
+                        host: challengeHost,
+                        presentedToken: message.header(HTTPHeaderName.authorization) != nil
+                    )
+                ), false
             )
         case .rateLimited(let retryAfter):
-            return .mcp(
-                .error(
-                    statusCode: 429,
-                    .invalidRequest("Too Many Requests: Try again later."),
-                    extraHeaders: ["Retry-After": String(retryAfter)]
-                )
+            return (
+                .mcp(
+                    .error(
+                        statusCode: 429,
+                        .invalidRequest("Too Many Requests: Try again later."),
+                        extraHeaders: ["Retry-After": String(retryAfter)]
+                    )
+                ), false
             )
         case .boundToDevice:
-            return .mcp(
-                .error(
-                    statusCode: 403,
-                    .invalidRequest(
-                        "Forbidden: This access token belongs to a device on the tailnet. Create a token for public access."
+            return (
+                .mcp(
+                    .error(
+                        statusCode: 403,
+                        .invalidRequest(
+                            "Forbidden: This access token belongs to a device on the tailnet. Create a token for public access."
+                        )
                     )
-                )
+                ), false
             )
         }
         guard message.path == "/mcp" else {
-            return .mcp(.error(statusCode: 404, .invalidRequest("Not Found: The MCP endpoint is /mcp.")))
+            return (.mcp(.error(statusCode: 404, .invalidRequest("Not Found: The MCP endpoint is /mcp."))), true)
         }
         if let rejection = validator.validate(request, context: context) {
-            return .mcp(rejection)
+            return (.mcp(rejection), true)
         }
-        return .mcp(await continueRequest(message, request, caller: caller, peer: nil, validator: validator))
+        return (.mcp(await continueRequest(message, request, caller: caller, peer: nil, validator: validator)), true)
     }
 
     /// The `401` for a request through Funnel.
@@ -1466,6 +1512,9 @@ final class HTTPServerConnection: @unchecked Sendable {
     private let connection: any TailnetConnection
     private let limits: HTTPRequestParser.Limits
     private let idleTimeout: Duration
+    /// How long a new connection can wait for its first request, if shorter than `idleTimeout`.
+    private let firstRequestTimeout: Duration?
+    private var servedRequests = 0
     /// How long a request can take to arrive in full, from its first byte.
     /// Without it, a client that sends one byte at a time keeps the connection for as long as it likes.
     private let requestDeadline: Duration?
@@ -1476,11 +1525,13 @@ final class HTTPServerConnection: @unchecked Sendable {
         _ connection: any TailnetConnection,
         limits: HTTPRequestParser.Limits = .tailnet,
         idleTimeout: Duration = HTTPServerConnection.idleTimeout,
+        firstRequestTimeout: Duration? = nil,
         requestDeadline: Duration? = nil
     ) {
         self.connection = connection
         self.limits = limits
         self.idleTimeout = idleTimeout
+        self.firstRequestTimeout = firstRequestTimeout
         self.requestDeadline = requestDeadline
     }
 
@@ -1512,6 +1563,7 @@ final class HTTPServerConnection: @unchecked Sendable {
                 if let onUpgrade, await onUpgrade(message, connection, buffer) {
                     return true
                 }
+                servedRequests += 1
                 let (response, keepAlive) = await handler(message)
                 let shouldKeepAlive = keepAlive && message.keepAlive
                 let sent = await write(response, keepAlive: shouldKeepAlive, streamEnded: streamEnded)
@@ -1550,6 +1602,8 @@ final class HTTPServerConnection: @unchecked Sendable {
                     guard await send(HTTPResponseEncoder.continueResponse) else { return nil }
                 }
                 var timeout = idleTimeout
+                // A client that connects and sends nothing doesn't hold the slot for the whole idle time.
+                if servedRequests == 0, firstByte == nil, let firstRequestTimeout { timeout = firstRequestTimeout }
                 if let requestDeadline, let firstByte {
                     let remaining = requestDeadline - (.now - firstByte)
                     // The request took too long. Close the connection.

@@ -1176,6 +1176,180 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
         await server.stop()
     }
 
+    private func publicRequest(
+        path: String = "/mcp",
+        host: String,
+        authorization: String? = nil,
+        extra: [String] = []
+    ) -> Data {
+        var head = ["GET \(path) HTTP/1.1", "Host: \(host)", "Content-Length: 0"]
+        if let authorization { head.append("Authorization: \(authorization)") }
+        head += extra
+        return Data((head.joined(separator: "\r\n") + "\r\n\r\n").utf8)
+    }
+
+    func testAnonymousRequestsKeepTheChallengeAndOnlyBadTokensAreCounted() async throws {
+        let node = FakeTailnetNode(state: .running(me), peers: [:])
+        let (store, _) = try makeStore()
+        let local = FakeLocalListener()
+        let server = makeFunnelServer(store: store, node: node, local: local)
+        await server.configure(.init(isEnabled: true, port: 4627, hostname: "mac-imcp", funnelEnabled: true))
+        try await waitUntil { await server.hasFunnelHost }
+        let host = "mac-imcp.example.ts.net"
+
+        // More anonymous requests than the failure limit still get the 401 challenge, never a 429.
+        for _ in 0 ..< FailedAuthLimiter().maximumFailures + 5 {
+            let response = await local.connect(sending: publicRequest(host: host))
+            XCTAssertTrue(response.hasPrefix("HTTP/1.1 401 "), response)
+            XCTAssertTrue(response.contains("resource_metadata="), response)
+        }
+        // Presented but invalid tokens do count.
+        var lastWasLimited = false
+        for _ in 0 ..< FailedAuthLimiter().maximumFailures + 2 {
+            let response = await local.connect(sending: publicRequest(host: host, authorization: "Bearer nope"))
+            lastWasLimited = response.hasPrefix("HTTP/1.1 429 ")
+        }
+        XCTAssertTrue(lastWasLimited)
+        // While blocked, an anonymous request still discovers the metadata.
+        let anonymous = await local.connect(sending: publicRequest(host: host))
+        XCTAssertTrue(anonymous.hasPrefix("HTTP/1.1 401 "), anonymous)
+        await server.stop()
+    }
+
+    func testBadTokensAreCountedPerCloudflareSender() async throws {
+        let node = FakeTailnetNode(state: .running(me), peers: [:])
+        let (store, _) = try makeStore()
+        let local = FakeLocalListener()
+        let server = makeFunnelServer(store: store, node: node, local: local)
+        await server.configure(
+            .init(
+                isEnabled: false,
+                port: 4627,
+                hostname: "mac-imcp",
+                funnelEnabled: false,
+                cloudflareHostname: "imcp.amesvt.com"
+            )
+        )
+        try await waitUntil { await server.publicLoopbackPort == 54321 }
+        let host = "imcp.amesvt.com"
+        func send(_ ip: String) async -> Bool {
+            let response = await local.connect(
+                sending: publicRequest(host: host, authorization: "Bearer nope", extra: ["CF-Connecting-IP: \(ip)"])
+            )
+            return response.hasPrefix("HTTP/1.1 429 ")
+        }
+        var blocked = false
+        for _ in 0 ..< FailedAuthLimiter().maximumFailures + 2 { blocked = await send("203.0.113.9") }
+        XCTAssertTrue(blocked)
+        // Another sender isn't affected.
+        let other = await send("198.51.100.7")
+        XCTAssertFalse(other)
+        // An IPv6 sender counts as its /64.
+        let first = await server.senderAddress(
+            of: HTTPRequestMessage(
+                method: "GET",
+                path: "/",
+                headers: ["CF-Connecting-IP": "2001:db8:1:2::1"],
+                body: Data(),
+                keepAlive: true
+            ),
+            matchedHost: host
+        )
+        let second = await server.senderAddress(
+            of: HTTPRequestMessage(
+                method: "GET",
+                path: "/",
+                headers: ["CF-Connecting-IP": "2001:db8:1:2:ffff::2"],
+                body: Data(),
+                keepAlive: true
+            ),
+            matchedHost: host
+        )
+        XCTAssertFalse(first.isEmpty)
+        XCTAssertEqual(first, second)
+        let junk = await server.senderAddress(
+            of: HTTPRequestMessage(
+                method: "GET",
+                path: "/",
+                headers: ["CF-Connecting-IP": "not an address"],
+                body: Data(),
+                keepAlive: true
+            ),
+            matchedHost: host
+        )
+        XCTAssertEqual(junk, "")
+        await server.stop()
+    }
+
+    func testForwardedAddressIsOnlyTrustedOnTheCloudflareHost() async throws {
+        let node = FakeTailnetNode(state: .running(me), peers: [:])
+        let (store, _) = try makeStore()
+        let local = FakeLocalListener()
+        let server = makeFunnelServer(store: store, node: node, local: local)
+        await server.configure(
+            .init(
+                isEnabled: true,
+                port: 4627,
+                hostname: "mac-imcp",
+                funnelEnabled: true,
+                cloudflareHostname: "imcp.amesvt.com"
+            )
+        )
+        try await waitUntil { await server.hasFunnelHost }
+        let message = HTTPRequestMessage(
+            method: "GET",
+            path: "/",
+            headers: ["CF-Connecting-IP": "203.0.113.9"],
+            body: Data(),
+            keepAlive: true
+        )
+        let cloudflare = await server.senderAddress(of: message, matchedHost: "imcp.amesvt.com")
+        let funnel = await server.senderAddress(of: message, matchedHost: "mac-imcp.example.ts.net")
+        XCTAssertFalse(cloudflare.isEmpty)
+        XCTAssertEqual(funnel, "")
+        await server.stop()
+    }
+
+    func testOnlyAuthenticatedPublicConnectionsKeepAlive() async throws {
+        let node = FakeTailnetNode(state: .running(me), peers: [:])
+        let (store, secret) = try makeStore(publicAccess: true)
+        let local = FakeLocalListener()
+        let server = makeFunnelServer(store: store, node: node, local: local)
+        await server.configure(.init(isEnabled: true, port: 4627, hostname: "mac-imcp", funnelEnabled: true))
+        try await waitUntil { await server.hasFunnelHost }
+        let host = "mac-imcp.example.ts.net"
+
+        let metadata = await local.connect(
+            sending: rawRequest("GET", "/.well-known/oauth-protected-resource", host: host)
+        )
+        XCTAssertTrue(metadata.contains("Connection: close"), metadata)
+        let anonymous = await local.connect(sending: publicRequest(host: host))
+        XCTAssertTrue(anonymous.contains("Connection: close"), anonymous)
+        let authenticated = await local.connect(sending: initializeRequest(secret: secret, host: host))
+        XCTAssertTrue(authenticated.hasPrefix("HTTP/1.1 200 OK\r\n"), authenticated)
+        XCTAssertTrue(authenticated.contains("Connection: keep-alive"), authenticated)
+        await server.stop()
+    }
+
+    func testNewConnectionThatSendsNothingClosesAfterTheFirstRequestTimeout() async throws {
+        let connection = TrickleConnection(trickles: false)
+        let http = HTTPServerConnection(
+            connection,
+            limits: .publicInternet,
+            idleTimeout: .seconds(60),
+            firstRequestTimeout: .milliseconds(200),
+            requestDeadline: .seconds(15)
+        )
+        let started = ContinuousClock.now
+        await http.serve(
+            { _ in (.mcp(.error(statusCode: 400, .invalidRequest("x"))), keepAlive: false) },
+            streamEnded: { _ in }
+        )
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(5))
+        XCTAssertTrue(connection.isClosed)
+        XCTAssertEqual(FunnelPolicy.firstRequestTimeout, .seconds(10))
+    }
+
     func testFunnelConnectionClosesWhenTheRequestTakesTooLong() async throws {
         // A client that sends a byte at a time never goes idle, so only the deadline ends it.
         let connection = TrickleConnection()
@@ -2386,13 +2560,17 @@ private final class FakeTailnetNode: TailnetNode, @unchecked Sendable {
 /// A connection whose peer sends one byte every 50 ms and never finishes a request.
 private final class TrickleConnection: TailnetConnection, @unchecked Sendable {
     let remoteAddress: String? = nil
+    /// Whether the peer keeps sending a byte at a time. If not, it sends nothing.
+    private let trickles: Bool
+
+    init(trickles: Bool = true) { self.trickles = trickles }
     private let lock = NSLock()
     private var _isClosed = false
     var isClosed: Bool { lock.withLock { _isClosed } }
 
     func receive(timeout: Duration) async throws -> Data {
         let delay = Duration.milliseconds(50)
-        if timeout < delay {
+        if !trickles || timeout < delay {
             try await Task.sleep(for: timeout)
             throw POSIXError(.ETIMEDOUT)
         }

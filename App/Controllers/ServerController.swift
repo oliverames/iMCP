@@ -323,7 +323,9 @@ final class ServerController: ObservableObject {
     private var approvals = ApprovalQueue<ClientCredentialStore.Request, ApprovalWaiter>()
     private let approvalWindowController = ConnectionApprovalWindowController()
     /// Apps that wait for the owner to approve public access through OAuth, keyed by request ID.
-    private var oauthApprovals = ApprovalQueue<OAuthApprovalRequest, OAuthApprovalWaiter>()
+    private var oauthApprovals = ApprovalQueue<OAuthApprovalRequest, OAuthApprovalWaiter>(
+        policy: ApprovalPolicy(denialCooldown: .seconds(OAuthAuthority.denialCooldown))
+    )
 
     private let networkManager = ServerNetworkManager()
 
@@ -755,7 +757,7 @@ final class ServerController: ObservableObject {
         await withCheckedContinuation { continuation in
             let admission = oauthApprovals.enqueue(
                 key: request.id,
-                cooldownKey: nil,
+                cooldownKey: OAuthAuthority.throttleKey(clientID: request.clientID, remote: request.remote),
                 request: request,
                 id: request.id,
                 waiter: OAuthApprovalWaiter(resume: { continuation.resume(returning: $0) }),
@@ -804,6 +806,17 @@ final class ServerController: ObservableObject {
             self?.finishOAuthApproval(key: key, decision: outcome.isApproved ? .approved(readOnly: true) : .denied)
         }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Closes the prompt for a request that a newer one from the same app replaced. It isn't a denial.
+    private func cancelOAuthApproval(id: String) {
+        let (waiter, resolution) = oauthApprovals.cancel(id: id)
+        waiter?.resume(.denied)
+        for entry in resolution.removed {
+            withdrawFromPhone(key: entry.key)
+            approvalWindowController.closeWindow(for: entry.key)
+        }
+        resolution.promoted.forEach(presentOAuthApproval)
     }
 
     private func finishOAuthApproval(key: String, decision: OAuthDecision) {
@@ -1124,6 +1137,9 @@ final class ServerController: ObservableObject {
             await self.networkManager.remoteAccess.setOAuthApprovalHandler { [weak self] request in
                 guard let self else { return .denied }
                 return await self.requestOAuthApproval(request)
+            }
+            await self.networkManager.remoteAccess.setOAuthCancelHandler { [weak self] id in
+                Task { @MainActor in self?.cancelOAuthApproval(id: id) }
             }
             self.oauthConnections.didRevoke = { [weak self] id in
                 guard let self else { return }

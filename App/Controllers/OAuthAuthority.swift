@@ -64,6 +64,8 @@ struct OAuthApprovalRequest: Equatable, Sendable {
     var redirectURI: String = ""
     /// A short code that the browser that started the request shows. The owner confirms that it matches.
     var verificationCode: String = ""
+    /// The sender's address where it's known, or `""`. A denial applies to this sender and app together.
+    var remote: String = ""
 
     /// What the approval window asks the owner, here so the iPhone approval can ask the same.
     var confirmationPrompt: String {
@@ -87,6 +89,10 @@ final class OAuthAuthority: @unchecked Sendable {
     static let usedCodeMemory: TimeInterval = 600
     static let pendingLifetime: TimeInterval = 130
     static let maximumPending = 16
+    /// The most requests that wait at once for one sender, where the sender's address is known.
+    static let maximumPendingPerRemote = 3
+    /// How long iMCP answers `access_denied` without asking, after the owner denies an app or lets a request expire.
+    static let denialCooldown: TimeInterval = 120
     static let maximumRegisteredClients = 100
     static let maximumRetiredRefreshTokens = 5
     static let accessPrefix = "imcpat_"
@@ -123,6 +129,21 @@ final class OAuthAuthority: @unchecked Sendable {
         var decision: OAuthDecision?
         /// The hash of the secret that the starting browser's cookie holds.
         var pollSecretHash: Data
+        /// The sender's address, or `""` where it isn't known.
+        var remote: String
+
+        var throttleKey: String { OAuthAuthority.throttleKey(clientID: client.id, remote: remote) }
+    }
+
+    /// The result of starting an authorization request.
+    enum PendingStart: Equatable {
+        /// The request waits for the owner. `superseded` lists earlier requests from the same app and sender
+        /// that this one replaced, whose approval prompts should close.
+        case started(OAuthApprovalRequest, superseded: [String])
+        /// The owner recently denied this app, so iMCP answers `access_denied` without asking.
+        case coolingDown
+        /// Too many requests wait.
+        case full
     }
 
     /// What `/authorize` does next with a pending request.
@@ -151,12 +172,14 @@ final class OAuthAuthority: @unchecked Sendable {
     private var accessTokens: [Data: AccessEntry] = [:]
     private var changeHandler: (@Sendable () -> Void)?
     private var tokenFailures = FailedAuthLimiter()
-    private var registrations = FailedAuthLimiter(maximumFailures: 20, window: 60, blockDuration: 60)
-    private var authorizations = FailedAuthLimiter(maximumFailures: 10, window: 60, blockDuration: 60)
+    private var registrations = KeyedAuthLimiter(maximumFailures: 20, window: 60, blockDuration: 60)
+    private var authorizations = KeyedAuthLimiter(maximumFailures: 10, window: 60, blockDuration: 60)
+    /// When iMCP may ask the owner again about an app and sender that the owner denied.
+    private var denials: [String: Date] = [:]
 
     init(
         storage: any OAuthGrantStorage = KeychainOAuthGrantStorage(),
-        fetchMetadata: @escaping MetadataFetch = ClientMetadataFetcher.fetch,
+        fetchMetadata: @escaping MetadataFetch = { try await ClientMetadataFetcher.fetch($0) },
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.storage = storage
@@ -263,24 +286,15 @@ final class OAuthAuthority: @unchecked Sendable {
         lock.withLock { tokenFailures.recordFailure(now: now()) }
     }
 
-    /// Counts a registration and returns the seconds to wait if there are too many.
-    func admitRegistration() -> Int? {
-        lock.withLock {
-            let time = now()
-            if let wait = registrations.retryAfter(now: time) { return wait }
-            registrations.recordFailure(now: time)
-            return registrations.retryAfter(now: time)
-        }
+    /// Counts a registration from `remote` and returns the seconds to wait if it made too many.
+    /// Each sender has its own count, so one sender's traffic doesn't block the others.
+    func admitRegistration(remote: String = "") -> Int? {
+        lock.withLock { registrations.admit(key: remote, now: now()) }
     }
 
-    /// Counts a new authorization request and returns the seconds to wait if there are too many.
-    func admitAuthorization() -> Int? {
-        lock.withLock {
-            let time = now()
-            if let wait = authorizations.retryAfter(now: time) { return wait }
-            authorizations.recordFailure(now: time)
-            return authorizations.retryAfter(now: time)
-        }
+    /// Counts a new authorization request from `remote` and returns the seconds to wait if it made too many.
+    func admitAuthorization(remote: String = "") -> Int? {
+        lock.withLock { authorizations.admit(key: remote, now: now()) }
     }
 
     // MARK: Clients
@@ -298,10 +312,22 @@ final class OAuthAuthority: @unchecked Sendable {
             name: ClientName.sanitized(name ?? ""),
             redirectURIs: redirectURIs
         )
-        lock.withLock {
-            if registered.count >= Self.maximumRegisteredClients,
-                let oldest = registered.min(by: { $0.value.at < $1.value.at })
-            {
+        try lock.withLock {
+            if registered.count >= Self.maximumRegisteredClients {
+                // A client with a grant stays: its owner would have to connect again. Only registrations
+                // that no grant uses can go, oldest first.
+                _ = try? loadIfNeeded()
+                let connected = Set(grants.map(\.clientID))
+                guard
+                    let oldest = registered.filter({ !connected.contains($0.key) })
+                        .min(by: { $0.value.at < $1.value.at })
+                else {
+                    throw OAuthError(
+                        code: "temporarily_unavailable",
+                        description: "Too many apps are connected. Try again later.",
+                        status: 503
+                    )
+                }
                 registered.removeValue(forKey: oldest.key)
             }
             registered[client.id] = (client, now())
@@ -364,12 +390,46 @@ final class OAuthAuthority: @unchecked Sendable {
         challenge: String,
         resource: String
     ) -> OAuthApprovalRequest? {
+        guard
+            case .started(let request, _) = startPending(
+                client: client,
+                redirectURI: redirectURI,
+                state: state,
+                challenge: challenge,
+                resource: resource
+            )
+        else { return nil }
+        return request
+    }
+
+    /// Starts a request that waits for the owner's decision, unless the owner just denied this app,
+    /// or too many requests wait. An earlier undecided request from the same app and sender is replaced,
+    /// so one app shows the owner one prompt at a time.
+    func startPending(
+        client: OAuthClient,
+        redirectURI: String,
+        state: String?,
+        challenge: String,
+        resource: String,
+        remote: String = ""
+    ) -> PendingStart {
         let host = URLComponents(string: redirectURI)?.host?.lowercased() ?? ""
+        let throttleKey = Self.throttleKey(clientID: client.id, remote: remote)
         return lock.withLock {
             let time = now()
             pending = pending.filter { $0.value.expires > time }
             pollSecrets = pollSecrets.filter { pending[$0.key] != nil }
-            guard pending.count < Self.maximumPending else { return nil }
+            denials = denials.filter { $0.value > time }
+            if denials[throttleKey] != nil { return .coolingDown }
+            let superseded = pending.filter { $0.value.decision == nil && $0.value.throttleKey == throttleKey }.keys
+            for id in superseded {
+                pending.removeValue(forKey: id)
+                pollSecrets.removeValue(forKey: id)
+            }
+            guard pending.count < Self.maximumPending else { return .full }
+            if !remote.isEmpty, pending.values.count(where: { $0.remote == remote }) >= Self.maximumPendingPerRemote {
+                return .full
+            }
             let request = OAuthApprovalRequest(
                 id: Self.makeSecret(prefix: "imcpa_"),
                 clientName: client.name,
@@ -378,7 +438,8 @@ final class OAuthAuthority: @unchecked Sendable {
                 redirectsToThisMac: Self.isLoopbackHost(host),
                 clientID: client.id,
                 redirectURI: redirectURI,
-                verificationCode: Self.makeVerificationCode()
+                verificationCode: Self.makeVerificationCode(),
+                remote: remote
             )
             let secret = Self.makeSecret(prefix: "")
             pollSecrets[request.id] = secret
@@ -390,14 +451,26 @@ final class OAuthAuthority: @unchecked Sendable {
                 challenge: challenge,
                 resource: resource,
                 expires: time.addingTimeInterval(Self.pendingLifetime),
-                pollSecretHash: Self.hash(secret)
+                pollSecretHash: Self.hash(secret),
+                remote: remote
             )
-            return request
+            return .started(request, superseded: Array(superseded))
         }
     }
 
+    /// What a denial or a limit is kept against: the app, and the sender where its address is known.
+    static func throttleKey(clientID: String, remote: String) -> String { "\(clientID)|\(remote)" }
+
     func setDecision(_ decision: OAuthDecision, for id: String) {
-        lock.withLock { pending[id]?.decision = decision }
+        lock.withLock {
+            guard pending[id] != nil else { return }
+            pending[id]?.decision = decision
+            if decision == .denied, let entry = pending[id] {
+                // Don't ask again about this app for a while, so that it can't keep prompting the owner.
+                denials[Self.throttleKey(clientID: entry.client.id, remote: entry.remote)] =
+                    now().addingTimeInterval(Self.denialCooldown)
+            }
+        }
     }
 
     /// Where a pending request stands.
