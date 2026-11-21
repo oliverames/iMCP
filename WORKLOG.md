@@ -6,7 +6,7 @@
 
 **Decisions made**: The #308 review, #364 update and #305 note were posted with Oliver's approval. Mattt took only #382's alert wording; the custom menu panel waits for his #316 wizard. The menu's accessibility changes (real buttons, system background, semantic fonts, standard About panel) can be offered separately; not yet offered.
 
-**Left off at**: Waiting on Mattt. The small menu accessibility PR was offered on #364; the panel gets reworked around #316 once it merges. Done since: every Notes tool accepts the database id or the `x-coredata://` id and returns both, through `NotesIDMapper` (an exact read-only database lookup, with the NotesShared bridge as fallback); `notes_create`'s title and timestamp matching is gone (`5dc4506`, 862 tests passed). Live checks are in `oliverames/iMCP#13`.
+**Left off at**: Waiting on Mattt. The small menu accessibility PR was offered on #364; the panel gets reworked around #316 once it merges. Done since: every Notes tool accepts the database id or the `x-coredata://` id and returns both, through `NotesIDMapper` (an exact read-only database lookup, with the NotesShared bridge as fallback); `notes_create`'s title and timestamp matching is gone (`5dc4506`, 862 tests passed). Live checks are in `oliverames/iMCP#13`. 2026-11-21: every Mattt review point on #373, #377, #378, #384, #385, #390 and #391 is fixed and answered (the #390 reply naming `ce80938` was missing and is now posted); merged agent worktrees and branches removed. Still waiting on Mattt; #390's macOS 26 job stays red until #393 merges.
 
 ---
 
