@@ -1,5 +1,15 @@
 # Worklog
 
+## 2026-11-21 - Mattt's morning reviews of #378 and #384, #390 rebased
+
+**What changed**: Mattt merged #393 and asked for changes on #378 and #384. #390 is rebased on main, with the empty CI re-run commit dropped; macOS 26 CI is green (`14070a2`). #378 reads new dates in a Gregorian `.current` calendar instead of the reminder's stored zone, and date-only `due` and `start` leave `timeZone` nil so they float (`82ac301`). #384 caps link and emphasis nesting at 8 levels, stops scanning a line for links once no `]` follows, and the search fake no longer returns unreadable notes as matches (`30ee512`). The new tests fail with the fixes reverted (a crash, then 257 s). Replies naming each commit are posted. The Notes fix is ported to fork main.
+
+**Decisions made**: The #384 rebase onto main, keeping #390's `NSAppleScript` helper, waits for #390 to merge, as Mattt asked.
+
+**Left off at**: Once #390 merges, rebase `pr/notes` on upstream main, keep #390's helper, re-run the Notes tests and push. Waiting on Mattt for #373, #377, #378, #385, #390, #391 and #392.
+
+---
+
 ## 2026-11-20 - Second review of the upstream PRs, fork ports, and outreach to Mattt
 
 **What changed**: Re-reviewed every open upstream PR and fixed what turned up, then updated each PR body and posted a comment tagging Mattt: #393 versions the CI cache key (Xcode 26.0 and 26.0.1 share build 17A400, so the bad archives kept restoring); #377 reports a cancelled confirmation as cancelled; #378 clamps stored alarms without trapping and resets the batch-delete store after a failed delete; #384 caps `scanLimit` by the budget, dedups unreadable IDs, returns a database `identifier` from create (`scriptIdentifier` for the scripting id), balances link parentheses; #385 refuses a long-s Photos library spelling and keeps tags, mode and name on replace with a new modification date; #391 re-checks pairing in `accept` and quarantines an unreadable old outbox; #392 sets `ASSETCATALOG_COMPILER_APPICON_NAME`. #384 and #385 are rebased onto the current #377. CI passes on #377, #378, #384, #385 and #393. Posted a review of Mattt's #308 (pre-auth connection and buffer exhaustion, global session cap, Host only checked when present, uncached whois failures), a #364 update with split offers for #378 and #384 and a TopoText testing offer, and a #305 note on how #390's helper fits his branch. Ported the Reminders, Files, Notes and confirmation fixes to fork main (`0bc19ea`, `3629176`, `f69e757`, `56cea32`). Tests no longer leave plists in `~/Library/Preferences` (`dfb55c2`, `0aa4ce3`; 6,231 old ones moved to the Trash). Fork CI green on `0aa4ce3`.
