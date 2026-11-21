@@ -84,7 +84,7 @@ Work that is in flight upstream is not on this list: #373, #377, #378, #384,
 
 Permanent on the fork:
 - NotesShared and ReminderKit private API tools.
-- The custom menu bar status item and panel. Resolve conflicts with #316 here.
+- The custom menu bar status item and panel. Resolve conflicts with #316 here, and once #316 merges, rework the panel around Mattt's wizard and offer it again. The menu accessibility change (real buttons, system background, semantic fonts, standard About panel) was offered separately on #364 on 2026-11-20.
 - The iOS app's own design. Keep sending small fixes against `mattt/ios-app`
   (like #391) and rebase when #281 ships.
 - The dev bootstrap stays in every build configuration (these builds only reach
