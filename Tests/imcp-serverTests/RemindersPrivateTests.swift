@@ -107,6 +107,21 @@ final class RemindersPrivateTests: XCTestCase {
         }
     }
 
+    func testPaddedOrCapitalizedActionsAreStillGated() async throws {
+        for call in gatedCalls {
+            guard let action = call.args["action"] as? String else { continue }
+            var args = call.args
+            args["action"] = "  \(action.uppercased())\n"
+            let defaults = try defaults(disabling: [call.gate])
+            var reachedBridge = false
+            _ = try? await RemindersPrivate.run(tool: call.tool, arguments: args, defaults: defaults) { _ in
+                reachedBridge = true
+                return ["verified": true]
+            }
+            XCTAssertFalse(reachedBridge, "\(call.tool) \(args) reached ReminderKit with \(call.gate) disabled")
+        }
+    }
+
     func testPrivateWritesRunWhenTheirSwitchIsOn() async throws {
         for call in gatedCalls {
             // Disabling an unrelated switch must not block the call.

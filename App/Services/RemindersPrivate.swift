@@ -509,9 +509,15 @@ enum RemindersPrivate {
         case "reminders_get_private": return false
         case "reminders_tags", "reminders_sections", "reminders_subtasks", "reminders_groups", "reminders_smart_lists",
             "reminders_templates":
-            return (args["action"] as? String)?.lowercased() != "list"
+            return normalizedAction(args) != "list"
         default: return true
         }
+    }
+
+    /// The action the way validation reads it: trimmed and lowercased.
+    /// The gate and the write check must see the same value the bridge acts on.
+    static func normalizedAction(_ args: [String: Any]) -> String? {
+        (args["action"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     // MARK: - Calling the bridge
@@ -540,7 +546,7 @@ enum RemindersPrivate {
     /// `reminders_update` therefore also turns off flagging, tagging, linking, nesting, and
     /// assigning a reminder to a section.
     static func governingSwitch(tool: String, arguments args: [String: Any]) -> String? {
-        let action = (args["action"] as? String)?.lowercased()
+        let action = normalizedAction(args)
         switch tool {
         case "reminders_flag", "reminders_add_link":
             return "reminders_update"
@@ -548,16 +554,16 @@ enum RemindersPrivate {
             return action == "list" ? nil : "reminders_update"
         case "reminders_subtasks":
             switch action {
+            case "list": return nil
             case "create": return "reminders_create"
-            case "move": return "reminders_update"
-            default: return nil
+            default: return "reminders_update"
             }
         case "reminders_sections":
             // Assigning moves a reminder; the other actions reshape a list.
             switch action {
+            case "list": return nil
             case "assign": return "reminders_update"
-            case "create", "rename", "delete": return "reminders_lists_update"
-            default: return nil
+            default: return "reminders_lists_update"
             }
         case "reminders_restore": return "reminders_create"
         case "reminders_list_appearance": return "reminders_lists_update"
@@ -566,14 +572,14 @@ enum RemindersPrivate {
             case "create": return "reminders_lists_create"
             case "rename": return "reminders_lists_rename"
             case "delete": return "reminders_lists_delete"
-            case "add_list", "remove_list": return "reminders_lists_update"
-            default: return nil
+            case "list": return nil
+            default: return "reminders_lists_update"
             }
         case "reminders_smart_lists", "reminders_templates":
             switch action {
-            case "create", "apply": return "reminders_lists_create"
+            case "list": return nil
             case "delete": return "reminders_lists_delete"
-            default: return nil
+            default: return "reminders_lists_create"
             }
         default: return nil
         }
