@@ -15,7 +15,8 @@ extension NotesService {
         readTools
             + NotesWriteTools.tools(
                 isEnabled: { NotesWriteTools.isEnabledInSettings },
-                runner: AppleNotesScriptRunner()
+                runner: AppleNotesScriptRunner(),
+                resolver: DatabaseIdentifierResolver(service: self)
             )
             + NotesOrganizeTools.tools(
                 isEnabled: { NotesWriteTools.isEnabledInSettings },
@@ -27,4 +28,29 @@ extension NotesService {
 
     /// The tools that change notes are new, so they start off until the person turns writes on.
     var writesEnabledByDefault: Bool { false }
+}
+
+/// Looks in the Notes database through the Notes service.
+struct DatabaseIdentifierResolver: NotesIdentifierResolving, @unchecked Sendable {
+    let service: NotesService
+
+    func noteID(
+        title: String,
+        folderPath: [String],
+        folderName: String,
+        accountName: String,
+        createdAfter date: Date
+    ) async -> String? {
+        await service.lookUpCreatedNote(
+            title: title,
+            folderPath: folderPath,
+            folderName: folderName,
+            accountName: accountName,
+            createdAfter: date
+        )
+    }
+
+    func folderID(path: [String], accountName: String) async -> String? {
+        await service.lookUpCreatedFolder(path: path, accountName: accountName)
+    }
 }

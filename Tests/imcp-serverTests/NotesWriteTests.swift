@@ -35,6 +35,19 @@ final class NotesWriteTests: XCTestCase {
     func testLinksKeepTheirAddressesInTheText() {
         XCTAssertEqual(html("[iMCP](https://imcp.app)"), "<div>iMCP (https://imcp.app)</div>")
         XCTAssertEqual(html("[https://a.example](https://a.example)"), "<div>https://a.example</div>")
+        XCTAssertEqual(
+            html("[x](https://en.wikipedia.org/wiki/Foo_(bar))"),
+            "<div>x (https://en.wikipedia.org/wiki/Foo_(bar))</div>"
+        )
+        // A bare address keeps its closing parenthesis, and a title after the address is still dropped.
+        XCTAssertEqual(
+            html("[https://e.com/a_(b)](https://e.com/a_(b))"),
+            "<div>https://e.com/a_(b)</div>"
+        )
+        XCTAssertEqual(
+            html(#"[x](https://e.com/a_(b) "title") after"#),
+            "<div>x (https://e.com/a_(b)) after</div>"
+        )
         XCTAssertEqual(html("![a chart](chart.png)"), "<div>a chart (chart.png)</div>")
         XCTAssertEqual(html("[**x**](https://e.com?a=1&b=2)"), "<div><b>x</b> (https://e.com?a=1&amp;b=2)</div>")
     }
@@ -247,9 +260,29 @@ final class NotesWriteTests: XCTestCase {
         }
     }
 
-    private func tools(enabled: Bool, runner: FakeRunner = FakeRunner()) -> [String: Tool] {
+    private struct FakeResolver: NotesIdentifierResolving {
+        var noteIdentifier: String?
+        var folderIdentifier: String?
+        func noteID(
+            title: String,
+            folderPath: [String],
+            folderName: String,
+            accountName: String,
+            createdAfter date: Date
+        ) async -> String? { noteIdentifier }
+        func folderID(path: [String], accountName: String) async -> String? { folderIdentifier }
+    }
+
+    private func tools(
+        enabled: Bool,
+        runner: FakeRunner = FakeRunner(),
+        resolver: FakeResolver = FakeResolver()
+    ) -> [String: Tool] {
         Dictionary(
-            uniqueKeysWithValues: NotesWriteTools.tools(isEnabled: { enabled }, runner: runner).map { ($0.name, $0) }
+            uniqueKeysWithValues: NotesWriteTools.tools(isEnabled: { enabled }, runner: runner, resolver: resolver).map
+            {
+                ($0.name, $0)
+            }
         )
     }
 
@@ -282,7 +315,9 @@ final class NotesWriteTests: XCTestCase {
 
     func testCreateRunsTheScriptWithTheCheckedRequest() async throws {
         let runner = FakeRunner()
-        let result = try await tools(enabled: true, runner: runner)["notes_create"]!([
+        let result = try await tools(enabled: true, runner: runner, resolver: FakeResolver(noteIdentifier: "UUID-1"))[
+            "notes_create"
+        ]!([
             "title": "Plan", "body": "- [ ] a", "format": "markdown", "folder": "Work/Ideas",
             "createMissingFolders": true,
         ])
@@ -292,7 +327,17 @@ final class NotesWriteTests: XCTestCase {
         XCTAssertEqual(call.parameters[3], .boolean(true))
         XCTAssertEqual(result.objectValue?["name"]?.stringValue, "Plan")
         XCTAssertEqual(result.objectValue?["folder"]?.stringValue, "Notes")
-        XCTAssertEqual(result.objectValue?["identifier"]?.stringValue, "x-coredata://1/ICNote/p7")
+        XCTAssertEqual(result.objectValue?["scriptIdentifier"]?.stringValue, "x-coredata://1/ICNote/p7")
+        XCTAssertEqual(result.objectValue?["identifier"]?.stringValue, "UUID-1")
+        XCTAssertNil(result.objectValue?["description"])
+    }
+
+    func testCreateOmitsTheIdentifierItCannotResolve() async throws {
+        let result = try await tools(enabled: true)["notes_create"]!(["title": "Plan"])
+        // The scripting id is never passed off as an id the read tools take.
+        XCTAssertNil(result.objectValue?["identifier"])
+        XCTAssertEqual(result.objectValue?["scriptIdentifier"]?.stringValue, "x-coredata://1/ICNote/p7")
+        XCTAssertNotNil(result.objectValue?["description"]?.stringValue)
     }
 
     func testCreateFolderRunsTheScript() async throws {
@@ -303,6 +348,13 @@ final class NotesWriteTests: XCTestCase {
         XCTAssertEqual(call.name, "createFolder")
         XCTAssertEqual(call.parameters, [.string("iCloud"), .strings(["Work"]), .string("Ideas")])
         XCTAssertEqual(result.objectValue?["name"]?.stringValue, "Ideas")
+        XCTAssertEqual(result.objectValue?["scriptIdentifier"]?.stringValue, "x-coredata://1/ICFolder/p8")
+        XCTAssertNil(result.objectValue?["identifier"])
+        let resolved = try await tools(enabled: true, resolver: FakeResolver(folderIdentifier: "F-1"))[
+            "notes_create_folder"
+        ]!(
+            ["name": "Ideas"])
+        XCTAssertEqual(resolved.objectValue?["identifier"]?.stringValue, "F-1")
     }
 
     func testBadArgumentsRunNoScript() async {

@@ -30,6 +30,33 @@ struct AppleNotesScriptRunner: NotesScriptRunning {
     }
 }
 
+/// Finds the Notes database's identifiers of what the script made,
+/// because the scripting interface's identifiers are not the ones the read tools take.
+protocol NotesIdentifierResolving: Sendable {
+    /// The identifier of the one note that was just made, or `nil` if it can't be told.
+    func noteID(
+        title: String,
+        folderPath: [String],
+        folderName: String,
+        accountName: String,
+        createdAfter date: Date
+    ) async -> String?
+    /// The identifier of the one folder that was just made, or `nil` if it can't be told.
+    func folderID(path: [String], accountName: String) async -> String?
+}
+
+/// Resolves nothing, for a service that can't read the database.
+struct NoIdentifierResolver: NotesIdentifierResolving {
+    func noteID(
+        title: String,
+        folderPath: [String],
+        folderName: String,
+        accountName: String,
+        createdAfter date: Date
+    ) async -> String? { nil }
+    func folderID(path: [String], accountName: String) async -> String? { nil }
+}
+
 /// The tools that create notes and folders.
 ///
 /// They only add to the Notes app: nothing they do changes or removes what is already there.
@@ -63,13 +90,14 @@ enum NotesWriteTools {
     /// The tools, each of which checks `isEnabled` when it runs.
     static func tools(
         isEnabled: @escaping @Sendable () -> Bool,
-        runner: any NotesScriptRunning
+        runner: any NotesScriptRunning,
+        resolver: any NotesIdentifierResolving = NoIdentifierResolver()
     ) -> [Tool] {
         [
             Tool(
                 name: "notes_create",
                 description:
-                    "Create a note in the Notes app. The title becomes the note's first line, and the body follows it. The note goes in the account's default folder unless a folder is given. Creating a note never changes existing notes. Notes keeps less than Markdown can say: a link becomes its text followed by its address, a checklist becomes bullets that start with ☐ or ☑, and a numbered list becomes lines that start with their numbers. Allowed only while \"Allow writes\" is on in iMCP's Notes settings.",
+                    "Create a note in the Notes app. The title becomes the note's first line, and the body follows it. The note goes in the account's default folder unless a folder is given. Creating a note never changes existing notes. The result's identifier, when present, is the note's id for the read tools; scriptIdentifier is the Notes scripting id and can't be passed to them. Notes keeps less than Markdown can say: a link becomes its text followed by its address, a checklist becomes bullets that start with ☐ or ☑, and a numbered list becomes lines that start with their numbers. Allowed only while \"Allow writes\" is on in iMCP's Notes settings.",
                 inputSchema: .object(
                     properties: [
                         "title": .string(
@@ -119,24 +147,38 @@ enum NotesWriteTools {
                     account: try string("account", in: arguments),
                     createMissingFolders: try bool("createMissingFolders", in: arguments) ?? false
                 )
+                // The database's creation date can differ a little from this clock.
+                let startedAt = Date().addingTimeInterval(-10)
                 let result = try await runner.run(NotesScripts.source, calling: NotesScripts.createNote(request))
                 guard result.count >= 4 else {
                     throw NotesWriteError.scriptFailed("Notes returned an unexpected answer")
                 }
-                return [
+                var object: [String: Value] = [
                     "@context": "https://schema.org",
                     "@type": "NoteDigitalDocument",
-                    "identifier": .string(result[0]),
+                    "scriptIdentifier": .string(result[0]),
                     "name": .string(result[1]),
                     "folder": .string(result[2]),
                     "account": .string(result[3]),
-                ] as Value
+                ]
+                if let id = await resolver.noteID(
+                    title: request.title,
+                    folderPath: request.folder.components,
+                    folderName: result[2],
+                    accountName: result[3],
+                    createdAfter: startedAt
+                ) {
+                    object["identifier"] = .string(id)
+                } else {
+                    object["description"] = .string(Self.unresolvedNote)
+                }
+                return Value.object(object)
             },
 
             Tool(
                 name: "notes_create_folder",
                 description:
-                    "Create a folder in the Notes app, at the top level of an account or inside a folder that exists. It is an error if the parent already has a folder with that name. Allowed only while \"Allow writes\" is on in iMCP's Notes settings.",
+                    "Create a folder in the Notes app, at the top level of an account or inside a folder that exists. It is an error if the parent already has a folder with that name. The result's identifier, when present, is the folder's id for the read tools; scriptIdentifier is the Notes scripting id and can't be passed to them. Allowed only while \"Allow writes\" is on in iMCP's Notes settings.",
                 inputSchema: .object(
                     properties: [
                         "name": .string(
@@ -172,16 +214,30 @@ enum NotesWriteTools {
                 guard result.count >= 3 else {
                     throw NotesWriteError.scriptFailed("Notes returned an unexpected answer")
                 }
-                return [
+                var object: [String: Value] = [
                     "@context": "https://schema.org",
                     "@type": "Collection",
-                    "identifier": .string(result[0]),
+                    "scriptIdentifier": .string(result[0]),
                     "name": .string(result[1]),
                     "account": .string(result[2]),
-                ] as Value
+                ]
+                if let id = await resolver.folderID(
+                    path: request.parent.components + [request.name],
+                    accountName: result[2]
+                ) {
+                    object["identifier"] = .string(id)
+                } else {
+                    object["description"] = .string(Self.unresolvedFolder)
+                }
+                return Value.object(object)
             },
         ]
     }
+
+    private static let unresolvedNote =
+        "The note was created. Its id for the read tools could not be found in the Notes database yet; use notes_fetch to find it."
+    private static let unresolvedFolder =
+        "The folder was created. Its id for the read tools could not be found in the Notes database yet; use notes_folders to find it."
 
     // MARK: - Arguments
 
