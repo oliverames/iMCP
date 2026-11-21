@@ -2,18 +2,21 @@
 
 ## 2026-11-20 - Review of upstream PRs, fork-only features and fork bugs
 
-**What changed**: Fork CI was red on every `main` run because the project compiles the gitignored `GeneratedBootstrapSecrets.swift`; CI now writes the empty fallback first (`47a656c`, first green run 44843370371). The Notes Markdown converter never closed a `<head>` skip, so text after a `<head>` was dropped (`c2527bf`, with a test).
+**What changed**: Reviewed every upstream PR, Mattt's comments, CI, the worklogs and the fork-only code, asked Oliver about each fork-only feature (plan recorded in `AGENTS.md`, `1b70789`), and fixed what the review found. All on `main`, CI green (run 44849951879), `imcp-serverTests` 826 passed, iMCP app builds.
+- CI: generates the empty bootstrap secrets file; fork CI had never passed (`47a656c`).
+- Notes Markdown export kept text after `<head>` (`c2527bf`); Unattended defaults to off for new installs (`87f1d89`).
+- Trust by signature only when imcp-server's direct parent is the app or a same-team bundled helper (`051d5f3`), Mattt's #374 point.
+- #391's outbox migration and liveness fixes ported, pairing checked when a link is installed, 8 KiB pre-auth WebSocket frames (`81ed856`, `4bf9b81`).
+- Cloudflare ingress: a failed read aborts, `path`/`originRequest`/unknown fields survive (`11d770b`), Mattt's #376 point.
+- Private Reminders tools honour the per-tool switches, on the normalized action, failing closed (`e4ecc2e`, `e6965ab`); NotesShared rolls back failed writes and tag batches validate first; group delete only after its lists move (`b09f035`).
+- `notes_update`/`notes_append` refuse notes with checklists, tags, links, tables, U+FFFC or sharing, read from the database through NoteTraits; attachments confined to one folder (`403ffd1`, `771f5f7`).
+- Public endpoint: per-sender OAuth limits, denial cooldown, one prompt per app and sender, DNS under the deadline, missing Authorization not counted, unauthenticated connections close (`a11e7b0`); `CF-Connecting-IP` ignored while Funnel is on, and no cooldown or replacement for unknown senders (`2c39ad7`).
 
-**Findings not yet fixed** (from a read-only review; verified by reading code, not by running it):
-- DevBootstrap and its secrets compile into every configuration; `IMCP_OMIT_BOOTSTRAP` is set nowhere. A locally built Release app or TestFlight IPA carries the device PSK, Cloudflare tunnel token and cert PEM, and forces services, writes, remote access and Unattended on.
-- The #391 outbox migration and liveness fixes are on `pr/ios-outbox-liveness` only, not on fork `main` (`MobileOutbox.swift:78`, `Mobile.swift` `answers(within:)` and `attach`).
-- `CloudflareTunnel.configureTunnelIngress`: `try?` on the GET turns any error into "no rules", so the PUT wipes an adopted tunnel's ingress; `IngressRule` drops `path` and `originRequest` on re-PUT (Mattt's #376 point, still partial).
-- Trust by signature (Mattt's #374 point) is partial: only shells are refused as intermediaries.
-- Private Reminders tools are not gated by the per-tool switches (`reminders_update`, `reminders_lists_*`, `reminders_create`).
-- `notes_append` rewrites the whole body and drops checklist state, tags and tables; NotesSharedBridge leaves the context dirty after a failed write; `notes_add_attachment`/`notes_save_attachment` take any absolute path.
-- Public endpoint: pre-auth 64 MiB WebSocket frames; global `/authorize` and `/register` limiters and anonymous approval dialogs let anyone block OAuth onboarding.
+**Decisions made**: The dev bootstrap stays in all builds (Oliver). The Notes rewrite guard maps the scripting id to the TopoText id through the NotesShared bridge, so with Private Notes features off, `notes_update`/`notes_append` refuse (fail closed). Funnel traffic has no sender address, so its OAuth limits stay shared.
 
-**Left off at**: Questions to Oliver on each fork-only feature and on which findings to fix.
+**Not verified**: Only unit tests and builds. Live checks are listed in `oliverames/iMCP#13`.
+
+**Left off at**: Mattt's re-review of #373/#377/#378/#384/#385/#390/#391/#393 is unchanged; #392 parked.
 
 ---
 
