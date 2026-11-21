@@ -213,6 +213,50 @@ enum CloudflareError: LocalizedError, Equatable, Sendable {
 
 // MARK: - Cloudflare v4 REST API Client
 
+/// A JSON value kept as is, so a configuration can be read, changed in one place,
+/// and written back without losing the fields this app doesn't model.
+enum CloudflareJSON: Codable, Equatable, Sendable {
+    case null
+    case bool(Bool)
+    case int(Int)
+    case double(Double)
+    case string(String)
+    case array([CloudflareJSON])
+    case object([String: CloudflareJSON])
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Int.self) {
+            self = .int(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .double(value)
+        } else if let value = try? container.decode(String.self) {
+            self = .string(value)
+        } else if let value = try? container.decode([CloudflareJSON].self) {
+            self = .array(value)
+        } else {
+            self = .object(try container.decode([String: CloudflareJSON].self))
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .string(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        }
+    }
+}
+
 /// Direct Cloudflare v4 REST API client built on URLSession.
 struct CloudflareAPIClient: Sendable {
     typealias HTTPTransport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
@@ -285,47 +329,74 @@ struct CloudflareAPIClient: Sendable {
         )
     }
 
+    /// Adds this hostname's rule to the tunnel's ingress without disturbing the rest of the
+    /// configuration. The configuration is read and written back as raw JSON, so each rule's
+    /// `path` and `originRequest`, the top-level `originRequest` and `warp-routing`, and any
+    /// field Cloudflare adds later survive. Only the rule for this hostname that has no path
+    /// is replaced or inserted.
+    ///
+    /// A failed read aborts: writing over a configuration that could not be read would wipe
+    /// an adopted tunnel's ingress. A tunnel with no configuration yet (a null result or a
+    /// null `config`) is empty.
     func configureTunnelIngress(
         accountID: String,
         tunnelID: String,
         hostname: String,
         serviceURL: String
     ) async throws {
-        struct IngressRule: Codable {
-            let hostname: String?
-            let service: String
+        struct Current: Decodable {
+            let config: CloudflareJSON?
         }
-        struct Config: Codable {
-            let ingress: [IngressRule]?
-        }
-        struct Body: Codable {
-            let config: Config
+        struct Body: Encodable {
+            let config: CloudflareJSON
         }
         let path = "accounts/\(Self.pathComponent(accountID))/cfd_tunnel/\(Self.pathComponent(tunnelID))/configurations"
         let normalizedHost = FunnelPolicy.normalizedHost(hostname)
 
-        // Preserve any existing ingress rules on an adopted tunnel rather than replacing them.
-        let existingRules: [IngressRule]
-        if let current: Body = try? await requestOptional(method: "GET", path: path) {
-            existingRules = current.config.ingress ?? []
-        } else {
-            existingRules = []
+        let current: Current? = try await requestOptional(method: "GET", path: path)
+        var config: [String: CloudflareJSON] = [:]
+        if case .object(let existing)? = current?.config { config = existing }
+        var rules: [CloudflareJSON] = []
+        if case .array(let existing)? = config["ingress"] { rules = existing }
+
+        func hostName(of rule: CloudflareJSON) -> String? {
+            guard case .object(let fields) = rule, case .string(let host)? = fields["hostname"] else {
+                return nil
+            }
+            return FunnelPolicy.normalizedHost(host)
+        }
+        func hasPath(_ rule: CloudflareJSON) -> Bool {
+            guard case .object(let fields) = rule, case .string(let path)? = fields["path"] else {
+                return false
+            }
+            return !path.isEmpty
         }
 
+        // The catch-all is the rule with neither a hostname nor a path. It stays last.
+        let catchAllIndex = rules.firstIndex { rule in
+            guard case .object(let fields) = rule else { return false }
+            return fields["hostname"] == nil && fields["path"] == nil
+        }
         let catchAll =
-            existingRules.first(where: { $0.hostname == nil })
-            ?? IngressRule(hostname: nil, service: "http_status:404")
-        var merged = existingRules.filter { rule in
-            guard let existingHost = rule.hostname else { return false }
-            return FunnelPolicy.normalizedHost(existingHost) != normalizedHost
-        }
-        merged.insert(IngressRule(hostname: hostname, service: serviceURL), at: 0)
-        merged.append(catchAll)
+            catchAllIndex.map { rules[$0] }
+            ?? .object(["service": .string("http_status:404")])
+        if let catchAllIndex { rules.remove(at: catchAllIndex) }
 
+        // Drop this hostname's old catch-for-the-host rule, but keep its path-specific rules.
+        rules.removeAll { hostName(of: $0) == normalizedHost && !hasPath($0) }
+        // The new rule goes after the host's path rules, which cloudflared must match first.
+        let insertAt = rules.lastIndex { hostName(of: $0) == normalizedHost }.map { $0 + 1 } ?? 0
+        rules.insert(
+            .object(["hostname": .string(hostname), "service": .string(serviceURL)]),
+            at: insertAt
+        )
+        rules.append(catchAll)
+
+        config["ingress"] = .array(rules)
         let _: EmptyResult? = try await requestOptional(
             method: "PUT",
             path: path,
-            body: Body(config: Config(ingress: merged))
+            body: Body(config: .object(config))
         )
     }
 

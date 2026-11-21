@@ -107,3 +107,140 @@ final class CloudflareTokenCheckTests: XCTestCase {
         XCTAssertNil(controller.account)
     }
 }
+
+final class CloudflareIngressTests: XCTestCase {
+    private final class Log: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [(method: String, body: Data?)] = []
+        func add(_ method: String, _ body: Data?) { lock.withLock { items.append((method, body)) } }
+        var all: [(method: String, body: Data?)] { lock.withLock { items } }
+    }
+
+    private func client(
+        log: Log,
+        getStatus: Int = 200,
+        getBody: String
+    ) -> CloudflareAPIClient {
+        CloudflareAPIClient(apiToken: "tok") { request in
+            let method = request.httpMethod ?? "GET"
+            log.add(method, request.httpBody)
+            let isGet = method == "GET"
+            let body = isGet ? getBody : #"{"success":true,"result":{}}"#
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: isGet ? getStatus : 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (Data(body.utf8), response)
+        }
+    }
+
+    private func putConfig(_ log: Log) throws -> [String: Any] {
+        let put = try XCTUnwrap(log.all.first { $0.method == "PUT" })
+        let json = try JSONSerialization.jsonObject(with: try XCTUnwrap(put.body)) as? [String: Any]
+        return try XCTUnwrap(json?["config"] as? [String: Any])
+    }
+
+    func testAFailedReadAbortsWithoutWriting() async {
+        let log = Log()
+        let client = client(
+            log: log,
+            getStatus: 500,
+            getBody: #"{"success":false,"errors":[{"code":1000,"message":"boom"}]}"#
+        )
+        do {
+            try await client.configureTunnelIngress(
+                accountID: "a",
+                tunnelID: "t",
+                hostname: "imcp.example.com",
+                serviceURL: "http://localhost:1"
+            )
+            XCTFail("a failed read must abort")
+        } catch {}
+        XCTAssertEqual(log.all.map(\.method), ["GET"], "nothing may be written after a failed read")
+    }
+
+    func testAnUnreadableReadAbortsWithoutWriting() async {
+        let log = Log()
+        let client = client(log: log, getBody: "<html>")
+        do {
+            try await client.configureTunnelIngress(
+                accountID: "a",
+                tunnelID: "t",
+                hostname: "imcp.example.com",
+                serviceURL: "http://localhost:1"
+            )
+            XCTFail("an unreadable read must abort")
+        } catch {}
+        XCTAssertEqual(log.all.map(\.method), ["GET"])
+    }
+
+    func testExistingRulesKeepTheirPathOriginRequestAndTheConfigurationAround() async throws {
+        let log = Log()
+        let existing = """
+            {"success":true,"result":{"tunnel_id":"t","version":3,"config":{
+              "originRequest":{"connectTimeout":10},
+              "warp-routing":{"enabled":true},
+              "ingress":[
+                {"hostname":"imcp.example.com","path":"/api/*","service":"http://localhost:9",
+                 "originRequest":{"noTLSVerify":true}},
+                {"hostname":"imcp.example.com","service":"http://localhost:old"},
+                {"hostname":"other.example.com","service":"http://localhost:5",
+                 "originRequest":{"httpHostHeader":"x"}},
+                {"service":"http_status:418"}
+              ]}}}
+            """
+        let client = client(log: log, getBody: existing)
+        try await client.configureTunnelIngress(
+            accountID: "a",
+            tunnelID: "t",
+            hostname: "imcp.example.com",
+            serviceURL: "http://localhost:1"
+        )
+        let config = try putConfig(log)
+        XCTAssertEqual((config["originRequest"] as? [String: Int])?["connectTimeout"], 10)
+        XCTAssertEqual((config["warp-routing"] as? [String: Bool])?["enabled"], true)
+
+        let rules = try XCTUnwrap(config["ingress"] as? [[String: Any]])
+        let summary = rules.map { rule in
+            [
+                rule["hostname"] as? String ?? "-",
+                rule["path"] as? String ?? "-",
+                rule["service"] as? String ?? "",
+            ].joined(separator: "|")
+        }
+        XCTAssertEqual(
+            summary,
+            [
+                "imcp.example.com|/api/*|http://localhost:9",
+                "imcp.example.com|-|http://localhost:1",
+                "other.example.com|-|http://localhost:5",
+                "-|-|http_status:418",
+            ]
+        )
+        XCTAssertEqual((rules[0]["originRequest"] as? [String: Bool])?["noTLSVerify"], true)
+        XCTAssertEqual((rules[2]["originRequest"] as? [String: String])?["httpHostHeader"], "x")
+    }
+
+    func testANewTunnelWithANullConfigGetsTheRuleAndACatchAll() async throws {
+        for body in [
+            #"{"success":true,"result":{"tunnel_id":"t","config":null}}"#,
+            #"{"success":true,"result":null}"#,
+            #"{"success":true,"result":{"tunnel_id":"t"}}"#,
+        ] {
+            let log = Log()
+            let client = client(log: log, getBody: body)
+            try await client.configureTunnelIngress(
+                accountID: "a",
+                tunnelID: "t",
+                hostname: "imcp.example.com",
+                serviceURL: "http://localhost:1"
+            )
+            let rules = try XCTUnwrap(putConfig(log)["ingress"] as? [[String: Any]], body)
+            XCTAssertEqual(rules.count, 2, body)
+            XCTAssertEqual(rules[0]["hostname"] as? String, "imcp.example.com", body)
+            XCTAssertEqual(rules[1]["service"] as? String, "http_status:404", body)
+        }
+    }
+}
