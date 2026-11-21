@@ -70,14 +70,40 @@ to `mattt/iMCP`:
 - **Approvals**: the **Unattended** switch (`Unattended`) is the one approval
   pattern that is fork-only. Allow writes and the shared confirmation window
   are Mattt's design and go upstream in #377.
-- **Setup/onboarding**: `OnboardingFlow`, `RemoteAccessChecklist` (#387/#388/#389
-  are pending upstream).
+- **Setup/onboarding**: `OnboardingFlow` and `RemoteAccessChecklist` stay here only
+  until Mattt merges his own Setup Assistant (he is building on #387); then the
+  fork takes his.
 - **Local config and dev tooling**: `Config/*.local.xcconfig`, the local plists,
   and the fork's `Scripts/` helpers (`generate-bootstrap-secrets.sh`,
   `install-ios.sh`, `check-home.py`).
 
 Work that is in flight upstream is not on this list: #373, #377, #378, #384,
-#385, #390, #391, #392, #387, #388, #389 and #393.
+#385, #390, #391, #392 and #393 (#387, #388 and #389 are parked; see below).
+
+## Long-term plan for each fork-only feature (Oliver, 2026-11-20)
+
+Permanent on the fork:
+- NotesShared and ReminderKit private API tools.
+- The custom menu bar status item and panel. Resolve conflicts with #316 here.
+- The iOS app's own design. Keep sending small fixes against `mattt/ios-app`
+  (like #391) and rebase when #281 ships.
+- The dev bootstrap stays in every build configuration (these builds only reach
+  Oliver's own devices).
+
+Waiting for upstream, then switch to Mattt's version:
+- Trust by code signature: keep the fork's version (with the intermediary
+  check) until Mattt ships his.
+- Setup Assistant, Settings redesign and Activity row (#387, #388, #389).
+- Bundled XPC Home helper: until upstream bundles the helper (#317).
+- Safari: until Mattt's Safari service ships.
+- Music playlist writes: until #327 merges.
+- Tailnet HTTP: adopt #308 once it merges. Funnel, Cloudflare Tunnel and OAuth
+  stay fork-only until Mattt decides how OAuth is hosted.
+- Notes edits through scripting: `notes_append` and `notes_update` refuse
+  notes with checklists, tags or tables; switch to TopoText's edit engine
+  once it writes.
+
+The Unattended switch stays fork-only and defaults to off for new installs.
 
 ## Working rules
 
