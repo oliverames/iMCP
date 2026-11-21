@@ -1281,7 +1281,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
         await server.stop()
     }
 
-    func testForwardedAddressIsOnlyTrustedOnTheCloudflareHost() async throws {
+    func testForwardedAddressIsIgnoredWhileFunnelIsOn() async throws {
         let node = FakeTailnetNode(state: .running(me), peers: [:])
         let (store, _) = try makeStore()
         let local = FakeLocalListener()
@@ -1295,7 +1295,7 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
                 cloudflareHostname: "imcp.amesvt.com"
             )
         )
-        try await waitUntil { await server.hasFunnelHost }
+        try await waitUntil { await server.publicHosts.count == 2 }
         let message = HTTPRequestMessage(
             method: "GET",
             path: "/",
@@ -1303,9 +1303,11 @@ final class RemoteAccessAuthorizationTests: XCTestCase {
             body: Data(),
             keepAlive: true
         )
+        // Both routes share one listener and only Host tells them apart,
+        // so a Funnel sender could name the Cloudflare host; the header isn't trusted on either.
         let cloudflare = await server.senderAddress(of: message, matchedHost: "imcp.amesvt.com")
         let funnel = await server.senderAddress(of: message, matchedHost: "mac-imcp.example.ts.net")
-        XCTAssertFalse(cloudflare.isEmpty)
+        XCTAssertEqual(cloudflare, "")
         XCTAssertEqual(funnel, "")
         await server.stop()
     }

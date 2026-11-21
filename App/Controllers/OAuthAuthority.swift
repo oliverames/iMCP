@@ -420,8 +420,14 @@ final class OAuthAuthority: @unchecked Sendable {
             pending = pending.filter { $0.value.expires > time }
             pollSecrets = pollSecrets.filter { pending[$0.key] != nil }
             denials = denials.filter { $0.value > time }
-            if denials[throttleKey] != nil { return .coolingDown }
-            let superseded = pending.filter { $0.value.decision == nil && $0.value.throttleKey == throttleKey }.keys
+            // With no sender address (Funnel), every sender would share one key, so a stranger who
+            // knows a client_id could silence that app or replace the owner's own request.
+            // Cooldowns and replacement apply only where the sender is known.
+            if !remote.isEmpty, denials[throttleKey] != nil { return .coolingDown }
+            let superseded =
+                remote.isEmpty
+                ? []
+                : Array(pending.filter { $0.value.decision == nil && $0.value.throttleKey == throttleKey }.keys)
             for id in superseded {
                 pending.removeValue(forKey: id)
                 pollSecrets.removeValue(forKey: id)
@@ -454,7 +460,7 @@ final class OAuthAuthority: @unchecked Sendable {
                 pollSecretHash: Self.hash(secret),
                 remote: remote
             )
-            return .started(request, superseded: Array(superseded))
+            return .started(request, superseded: superseded)
         }
     }
 
@@ -465,7 +471,7 @@ final class OAuthAuthority: @unchecked Sendable {
         lock.withLock {
             guard pending[id] != nil else { return }
             pending[id]?.decision = decision
-            if decision == .denied, let entry = pending[id] {
+            if decision == .denied, let entry = pending[id], !entry.remote.isEmpty {
                 // Don't ask again about this app for a while, so that it can't keep prompting the owner.
                 denials[Self.throttleKey(clientID: entry.client.id, remote: entry.remote)] =
                     now().addingTimeInterval(Self.denialCooldown)

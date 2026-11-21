@@ -1141,9 +1141,12 @@ actor RemoteAccessServer {
     /// Tailscale Funnel hides the sender, so every Funnel request shares one count.
     /// Cloudflare sets `CF-Connecting-IP` on every request that it forwards, so the header is
     /// trusted only on the Cloudflare host, where Cloudflare replaces whatever the sender wrote.
+    /// Both routes share one loopback listener and only `Host` tells them apart, so while Funnel
+    /// is on, a Funnel sender could name the Cloudflare host and pick its own count. The header is
+    /// then ignored and every sender shares one count.
     /// An IPv6 sender counts as its /64, because one subscriber holds a whole /64.
     func senderAddress(of message: HTTPRequestMessage, matchedHost: String?) -> String {
-        guard let matchedHost, matchedHost == cloudflareHost, matchedHost != tailscaleFunnelHost,
+        guard tailscaleFunnelHost == nil, let matchedHost, matchedHost == cloudflareHost,
             let value = message.header("CF-Connecting-IP")?.trimmingCharacters(in: .whitespaces)
         else { return "" }
         var v4 = in_addr()

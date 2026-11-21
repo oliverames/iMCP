@@ -827,6 +827,25 @@ final class OAuthTests: XCTestCase {
         }
     }
 
+    func testUnknownSendersCanNeitherSilenceNorReplaceAnotherRequest() throws {
+        let authority = makeAuthority()
+        let client = try register(authority)
+        guard case .started(let owner, _) = pendingRequest(authority, client) else {
+            return XCTFail("Expected a started request")
+        }
+        // A stranger on Funnel asks for the same app; the owner's request must survive.
+        guard case .started(let stranger, let superseded) = pendingRequest(authority, client) else {
+            return XCTFail("Expected a started request")
+        }
+        XCTAssertTrue(superseded.isEmpty)
+        // Denying the stranger must not lock the app out for everyone else on Funnel.
+        authority.setDecision(.denied, for: stranger.id)
+        guard case .started = pendingRequest(authority, client) else {
+            return XCTFail("An unknown sender's denial must not cool the app down")
+        }
+        XCTAssertNotEqual(owner.id, stranger.id)
+    }
+
     func testNewRequestReplacesTheEarlierOneFromTheSameAppAndSender() throws {
         let authority = makeAuthority()
         let client = try register(authority)
