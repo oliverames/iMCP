@@ -451,6 +451,19 @@ static NSArray *childLists(id group) {
     return out;
 }
 
+/// The list objects inside a group. Unlike `childLists`, this fails when the selectors are gone or
+/// the fetch errors, because a caller that moves lists on the strength of an empty answer would
+/// delete lists it never saw.
+static NSArray *fetchChildListObjects(id group) {
+    if (![group respondsToSelector:@selector(sublistContext)]) need(group, @selector(sublistContext));
+    id sub = [group sublistContext];
+    NEED(sub, fetchListsWithError:);
+    NSError *e = nil;
+    NSArray *lists = [sub fetchListsWithError:&e];
+    if (!lists) fail(@"reminderkit_changed", [@"The group's lists could not be read: " stringByAppendingString:errText(e)]);
+    return lists;
+}
+
 static NSDictionary *groupSummary(id g) {
     return @{ @"id" : idOf(g), @"name" : nameOf(g), @"lists" : childLists(g) };
 }
@@ -845,13 +858,33 @@ static NSDictionary *actionGroups(NSDictionary *args) {
         return @{ @"group" : groupSummary([store fetchListWithObjectID:[group remObjectID] error:nil] ?: group), @"verified" : @(verified) };
     }
     if ([mode isEqualToString:@"delete"]) {
+        // The child lists are moved out and checked in a save of their own. The group is removed
+        // only after they read back at the top level, so a failure here never deletes their group.
+        NSArray *kids = fetchChildListObjects(group);
+        if (kids.count > 0) {
+            id moveSave = newSave();
+            id moveAccount = [moveSave updateAccount:account];
+            for (id child in kids) {
+                id cc = [moveSave updateList:child];
+                NEED(cc, removeFromParentWithAccountChangeItem:);
+                [cc removeFromParentWithAccountChangeItem:moveAccount];
+                [moveAccount addListChangeItem:cc];
+            }
+            commit(moveSave);
+            NEED(store, fetchListWithObjectID:error:);
+            for (id child in kids) {
+                id moved = [store fetchListWithObjectID:[child remObjectID] error:nil];
+                if (!moved || safeValue(moved, @"parentListID") != nil) {
+                    fail(@"delete_refused", [NSString stringWithFormat:@"The list '%@' could not be confirmed at the top level after being moved out of the group, so the group was not deleted.", nameOf(child)]);
+                }
+            }
+            id regroup = [store fetchListWithObjectID:[group remObjectID] error:nil] ?: group;
+            if (fetchChildListObjects(regroup).count > 0) {
+                fail(@"delete_refused", @"The group still holds lists after they were moved out, so it was not deleted.");
+            }
+        }
         id save = newSave();
         id ac = [save updateAccount:account];
-        for (id child in [[group sublistContext] fetchListsWithError:nil] ?: @[]) {
-            id cc = [save updateList:child];
-            [cc removeFromParentWithAccountChangeItem:ac];
-            [ac addListChangeItem:cc];
-        }
         id gc = [save updateList:group];
         [gc removeFromParentWithAccountChangeItem:ac];
         commit(save);

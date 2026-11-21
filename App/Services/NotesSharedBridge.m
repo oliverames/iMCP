@@ -205,6 +205,17 @@ static void saveContext(NSManagedObjectContext *moc) {
     }
 }
 
+/// Discards unsaved edits on the shared context. The context outlives each request, so an edit
+/// made before a `fail()` or an exception, and never saved, would otherwise be committed with the
+/// next request's save. Does nothing when the context was never opened.
+static void rollbackSharedContext(void) {
+    NSManagedObjectContext *moc = gMOC;
+    if (!moc) return;
+    [moc performBlockAndWait:^{
+        if (moc.hasChanges) [moc rollback];
+    }];
+}
+
 #pragma mark - Notes, folders, identifiers
 
 static NSString *noteURI(id note) { return [[[note objectID] URIRepresentation] absoluteString]; }
@@ -794,9 +805,16 @@ static NSDictionary *actionTagsChange(NSDictionary *args) {
         NSString *newTag = args[@"new"] ? cleanTagArgs(@[ args[@"new"] ]).firstObject : nil;
         NSMutableArray *results = [NSMutableArray array];
         BOOL allVerified = YES;
+        // Check the mode and every note before changing any, so a locked or missing note later
+        // in the list refuses the whole call instead of failing after earlier notes changed.
+        if (![@[ @"add", @"remove", @"replace" ] containsObject:mode ?: @""]) fail(@"invalid_mode", @"Unknown tag action.");
+        NSMutableArray *notes = [NSMutableArray array];
         for (id ident in ids) {
-            id note = findNote(ident);
-            requireEditable(note);
+            id candidate = findNote(ident);
+            requireEditable(candidate);
+            [notes addObject:candidate];
+        }
+        for (id note in notes) {
             NSArray *before = tagsOf(bodyObjects(note, m, NO));
             NSMutableArray *expectPresent = [NSMutableArray array], *expectAbsent = [NSMutableArray array];
             NSMutableArray *changed = [NSMutableArray array];
@@ -1245,6 +1263,8 @@ static NSDictionary *actionDebug(NSString *action, NSDictionary *args) {
                 out = @{ @"ok" : @YES, @"result" : [self dispatch:req[@"action"] args:args] };
             }
         } @catch (NSException *ex) {
+            // A request that failed part way must not leave its half edit for the next save.
+            @try { rollbackSharedContext(); } @catch (NSException *ignored) {}
             if ([ex.name isEqualToString:kFail]) {
                 out = @{ @"ok" : @NO, @"error" : @{ @"code" : ex.userInfo[@"code"] ?: @"error", @"message" : ex.reason ?: @"" } };
             } else {
