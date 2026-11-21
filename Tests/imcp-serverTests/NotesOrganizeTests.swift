@@ -178,6 +178,11 @@ final class NotesOrganizeTests: XCTestCase {
         )
     }
 
+    func testHeadIsSkippedButTheBodyAfterItIsKept() {
+        let html = "<html><head><title>T</title><style>p{}</style></head><body><div>kept</div></body></html>"
+        XCTAssertEqual(NotesHTMLToMarkdown.markdown(fromHTML: html), "kept")
+    }
+
     private func item(_ title: String, locked: Bool = false) throws -> NotesExportItem {
         var fields = noteFields(plain: "\(title)\nbody")
         fields[1] = title

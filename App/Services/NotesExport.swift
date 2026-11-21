@@ -119,7 +119,7 @@ enum NotesHTMLToMarkdown {
             let attributes = String(body.dropFirst(name.count))
 
             if skipDepth > 0 {
-                if name == "script" || name == "style" {
+                if name == "script" || name == "style" || name == "head" {
                     if isClosing { skipDepth -= 1 } else { skipDepth += 1 }
                 }
                 return
