@@ -8,6 +8,11 @@ private let notesDatabaseName = "NoteStore.sqlite"
 private let notesDatabasePath = notesContainerURL.appendingPathComponent(notesDatabaseName).path
 private let notesContainerBookmarkKey: String = "me.mattt.iMCP.notesContainerBookmark"
 
+/// Lets a closure that must be `Sendable` hold the Notes service, which guards its own state.
+struct UncheckedServiceBox: @unchecked Sendable {
+    let service: NotesService
+}
+
 /// Reads notes from the database that the Notes app keeps on this Mac.
 ///
 /// Apple provides no public API for Notes,
@@ -52,13 +57,14 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
             try self.checkDatabaseAccess()
             let folders = try await self.withStore { try await $0.folders() }
 
-            return [
+            let list: Value = [
                 "@context": "https://schema.org",
                 "@type": "ItemList",
                 "name": "Note Folders",
                 "numberOfItems": .int(folders.count),
                 "itemListElement": Value.array(folders.map { $0.value(in: folders) }),
             ]
+            return await self.withScriptIdentifiers(list)
         }
 
         Tool(
@@ -73,7 +79,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                     ),
                     "folder": .string(
                         description:
-                            "Name or @id of a folder, as returned by notes_folders. Fetches only the notes directly in that folder"
+                            "Name or @id of a folder, as returned by notes_folders, or its x-coredata:// scriptIdentifier. Fetches only the notes directly in that folder"
                     ),
                     "start": .string(
                         description:
@@ -160,7 +166,18 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                 }
                 request.cursor = cursor
             }
-            let folderArgument = try self.argument("folder", in: arguments, as: \.stringValue)
+            let givenFolder = try self.argument("folder", in: arguments, as: \.stringValue)
+            let folderArgument: String?
+            if let given = givenFolder?.trimmingCharacters(in: .whitespacesAndNewlines),
+                NotesScriptID(given)?.kind == .folder
+            {
+                guard let uuid = try await self.idMapper.uuids(forScriptIDs: [given])[given] else {
+                    throw ArgumentError.invalid("no folder has the id \(given); use notes_folders to list them")
+                }
+                folderArgument = uuid
+            } else {
+                folderArgument = givenFolder
+            }
             let filter = try self.noteFilter(from: arguments)
 
             try self.checkDatabaseAccess()
@@ -243,7 +260,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
             if !caveats.isEmpty {
                 list["description"] = .string(caveats.joined(separator: " "))
             }
-            return list
+            return await self.withScriptIdentifiers(.object(list))
         }
 
         Tool(
@@ -260,7 +277,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                 openWorldHint: false
             )
         ) { _ in
-            try await self.smartFoldersResult()
+            await self.withScriptIdentifiers(try await self.smartFoldersResult())
         }
 
         Tool(
@@ -288,11 +305,12 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         Tool(
             name: "notes_read",
             description:
-                "Read the full contents of a note from the Notes app, as Markdown with headings, lists, checklists, links, and tables, or as plain text, with its tags (keywords), the notes it links to (linkedNotes), the notes that link to it (linkedFrom), and its word count. Tags and links are database records, which may remain after their text is deleted; links set on ordinary text are not listed. Locked and Recently Deleted notes supply no tags or links but can be link targets. Attachments such as images and drawings appear as bracketed descriptions; notes_attachments lists them. Notes locked with a password can't be read.",
+                "Read the full contents of a note from the Notes app (by its UUID or x-coredata:// id), as Markdown with headings, lists, checklists, links, and tables, or as plain text, with its tags (keywords), the notes it links to (linkedNotes), the notes that link to it (linkedFrom), and its word count. Tags and links are database records, which may remain after their text is deleted; links set on ordinary text are not listed. Locked and Recently Deleted notes supply no tags or links but can be link targets. Attachments such as images and drawings appear as bracketed descriptions; notes_attachments lists them. Notes locked with a password can't be read.",
             inputSchema: .object(
                 properties: [
                     "id": .string(
-                        description: "The note @id, as returned by notes_fetch"
+                        description:
+                            "The note @id (UUID) as returned by notes_fetch, or its x-coredata:// scriptIdentifier"
                     ),
                     "format": .string(
                         description: "Format of the returned text",
@@ -309,12 +327,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                 openWorldHint: false
             )
         ) { arguments in
-            guard
-                let argument = try self.argument("id", in: arguments, as: \.stringValue),
-                let id = TopoText.Note.ID(argument.trimmingCharacters(in: .whitespacesAndNewlines))
-            else {
-                throw ArgumentError.invalid("id must be the @id of a note")
-            }
+            let id = try await self.noteID(from: arguments)
             let isMarkdown: Bool
             switch try self.argument("format", in: arguments, as: \.stringValue) ?? "markdown" {
             case "markdown": isMarkdown = true
@@ -333,7 +346,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
             object["text"] = .string(isMarkdown ? content.markdown() : content.plainText())
             object.merge(context.inlineProperties) { current, _ in current }
             object.merge(NoteTraits(content: content).properties) { current, _ in current }
-            return object
+            return await self.withScriptIdentifiers(.object(object))
         }
 
         Tool(
@@ -343,7 +356,8 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
             inputSchema: .object(
                 properties: [
                     "id": .string(
-                        description: "The note @id, as returned by notes_fetch"
+                        description:
+                            "The note @id (UUID) as returned by notes_fetch, or its x-coredata:// scriptIdentifier"
                     )
                 ],
                 required: ["id"],
@@ -468,14 +482,14 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
 
     /// What the database says a note holds, for a note named by its scripting id.
     ///
-    /// The database names notes by UUID and the scripting interface by `x-coredata://…/ICNote/pN`,
-    /// and nothing in the database maps one to the other, so the UUID comes from the NotesShared
-    /// bridge (`notes_structure`), which looks the note up by its scripting id. That needs
-    /// "Private Notes features" turned on; without it, this throws and the caller refuses.
+    /// The id is turned into the note's UUID by reading the database's own rows (`NotesIDMapper`).
+    /// If the database can't be read, the NotesShared bridge is asked instead, which needs
+    /// "Private Notes features" turned on; without either, this throws and the caller refuses.
     func traits(ofScriptedNote scriptingID: String) async throws -> NoteTraits {
-        let structure = try await NotesPrivate.run(tool: "notes_structure", arguments: ["id": scriptingID])
-        guard let uuid = structure["identifier"] as? String, let id = TopoText.Note.ID(uuid) else {
-            throw ArgumentError.invalid("Notes gave no database identifier for the note")
+        guard let uuid = try await idMapper.uuids(forScriptIDs: [scriptingID])[scriptingID],
+            let id = TopoText.Note.ID(uuid)
+        else {
+            throw ArgumentError.invalid("The Notes database has no note with the id \(scriptingID)")
         }
         try checkDatabaseAccess()
         return try await withStore { store in
@@ -541,83 +555,61 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         }
     }
 
-    // MARK: - Finding What a Script Created
+    // MARK: - Identifiers
 
-    /// Looks for the database's identifier of a note that the scripting interface just made.
-    ///
-    /// The scripting interface's identifier is not the database's, so a client can't use it with the read tools.
-    /// The database can lag behind Notes by a moment, so this tries again for about a second.
-    /// - Returns: The identifier, or `nil` if the database can't be read or doesn't have exactly one such note.
-    func lookUpCreatedNote(
-        title: String,
-        folderPath: [String],
-        folderName: String,
-        accountName: String,
-        createdAfter date: Date
-    ) async -> String? {
-        guard (try? checkDatabaseAccess()) != nil else { return nil }
-        for attempt in 0 ..< 5 {
-            if attempt > 0 { try? await Task.sleep(for: .milliseconds(200)) }
-            let found = try? await withStore { store in
-                try await store.withSnapshot { snapshot -> String? in
-                    let folders = try snapshot.folders()
-                    let nodes = folders.map {
-                        FolderNode(id: $0.id, name: $0.name, parentID: $0.parentID, accountName: $0.account?.name)
-                    }
-                    let ids = Set(
-                        folderIDs(
-                            atPath: folderPath,
-                            defaultFolderName: folderName,
-                            accountName: accountName,
-                            among: nodes
-                        )
-                    )
-                    guard !ids.isEmpty else { return nil }
-                    var request = TopoText.Note.FetchRequest(
-                        query: title,
-                        limit: TopoText.Note.FetchRequest.maximumLimit
-                    )
-                    request.folderIDs = ids
-                    request.startDate = date
-                    let candidates = try snapshot.search(request).notes.map {
-                        NoteCandidate(id: $0.id, title: $0.title, creationDate: $0.creationDate)
-                    }
-                    return uniqueNewNoteID(title: title, createdAfter: date, among: candidates)?.description
-                }
+    /// Reads the database's own rows to turn a note's or folder's UUID into the scripting id and back.
+    var databaseIDMapper: NotesDatabaseIDMapper {
+        let box = UncheckedServiceBox(service: self)
+        return NotesDatabaseIDMapper { read in
+            try await box.service.withNotesFolder { folder in
+                try box.service.checkDatabaseAccess()
+                return try read(folder)
             }
-            if let found { return found }
         }
-        return nil
     }
 
-    /// Looks for the database's identifier of a folder that the scripting interface just made.
-    func lookUpCreatedFolder(path: [String], accountName: String) async -> String? {
-        guard (try? checkDatabaseAccess()) != nil else { return nil }
-        for attempt in 0 ..< 5 {
-            if attempt > 0 { try? await Task.sleep(for: .milliseconds(200)) }
-            let found = try? await withStore { store in
-                try await store.withSnapshot { snapshot -> String? in
-                    let nodes = try snapshot.folders().map {
-                        FolderNode(id: $0.id, name: $0.name, parentID: $0.parentID, accountName: $0.account?.name)
-                    }
-                    let ids = folderIDs(atPath: path, defaultFolderName: "", accountName: accountName, among: nodes)
-                    return ids.count == 1 ? ids[0].description : nil
-                }
-            }
-            if let found { return found }
+    /// The database, and the NotesShared bridge when the database can't be read.
+    var idMapper: any NotesIDMapping {
+        FallbackNotesIDMapper(primary: databaseIDMapper, fallback: NotesBridgeIDMapper.live)
+    }
+
+    /// The note that an `id` argument names, whether by UUID or by scripting id.
+    private func noteID(from arguments: [String: Value]) async throws -> TopoText.Note.ID {
+        guard let argument = try self.argument("id", in: arguments, as: \.stringValue) else {
+            throw ArgumentError.invalid("id is required")
         }
-        return nil
+        let text = argument.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let parsed = NotesScriptID(text), parsed.kind == .note {
+            guard let uuid = try await idMapper.uuids(forScriptIDs: [text])[text], let id = TopoText.Note.ID(uuid)
+            else {
+                throw ArgumentError.invalid("no note has the id \(text); use notes_fetch to find notes")
+            }
+            return id
+        }
+        guard let id = TopoText.Note.ID(text) else {
+            throw ArgumentError.invalid("id must be the UUID (@id) or the x-coredata:// id of a note")
+        }
+        return id
+    }
+
+    /// Adds `identifier` (the UUID) and `scriptIdentifier` to each note and folder in a result,
+    /// so a client can pass either to any Notes tool.
+    /// A note or folder that the database can't give a scripting id for is left as it is.
+    func withScriptIdentifiers(_ result: Value) async -> Value {
+        let ids = NotesScriptIdentifierAnnotator.ids(in: result)
+        guard !ids.isEmpty else { return result }
+        let mapper = databaseIDMapper
+        var scriptIDs: [String: String] = [:]
+        for kind in [NotesIDKind.note, .folder] {
+            if let found = try? await mapper.scriptIDs(forUUIDs: ids, kind: kind) { scriptIDs.merge(found) { $1 } }
+        }
+        return NotesScriptIdentifierAnnotator.annotate(result, scriptIDs: scriptIDs)
     }
 
     // MARK: - Tool Results
 
     private func attachmentsResult(_ arguments: [String: Value]) async throws -> Value {
-        guard
-            let argument = try self.argument("id", in: arguments, as: \.stringValue),
-            let id = TopoText.Note.ID(argument.trimmingCharacters(in: .whitespacesAndNewlines))
-        else {
-            throw ArgumentError.invalid("id must be the @id of a note")
-        }
+        let id = try await self.noteID(from: arguments)
 
         try self.checkDatabaseAccess()
         let attachments = try await self.withStore { store in
@@ -860,33 +852,40 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
     /// Errors from TopoText are rethrown as `StoreError`, which describes them for the client.
     private func withStore<T>(_ operation: (TopoText.Store) async throws -> T) async throws -> T {
         do {
-            guard UserDefaults.standard.data(forKey: notesContainerBookmarkKey) != nil else {
-                return try await operation(TopoText.Store(root: notesContainerURL))
+            return try await withNotesFolder { directory in
+                try await operation(TopoText.Store(root: directory))
             }
-
-            let directory: URL
-            do {
-                directory = try resolveBookmarkedContainer()
-            } catch let error where canAccessDatabaseAtDefaultPath {
-                log.error(
-                    "Using the Notes database at the default path because the stored bookmark doesn't resolve: \(error.localizedDescription)"
-                )
-                return try await operation(TopoText.Store(root: notesContainerURL))
-            }
-
-            // The grant must stay open until the store's call returns:
-            // SQLite opens the write-ahead log lazily on the first statement.
-            guard directory.startAccessingSecurityScopedResource() else {
-                log.error("Failed to start accessing security-scoped resource")
-                throw DatabaseAccessError.securityScopeAccessFailed
-            }
-            defer { directory.stopAccessingSecurityScopedResource() }
-            return try await operation(TopoText.Store(root: directory))
         } catch let error as TopoText.NotesError {
             throw StoreError(underlying: error)
         } catch let error as TopoText.Note.FetchRequest.ValidationError {
             throw StoreError(underlying: error)
         }
+    }
+
+    /// Runs an operation on the Notes folder inside the grant for it, described at `withStore`.
+    func withNotesFolder<T>(_ operation: (URL) async throws -> T) async throws -> T {
+        guard UserDefaults.standard.data(forKey: notesContainerBookmarkKey) != nil else {
+            return try await operation(notesContainerURL)
+        }
+
+        let directory: URL
+        do {
+            directory = try resolveBookmarkedContainer()
+        } catch let error where canAccessDatabaseAtDefaultPath {
+            log.error(
+                "Using the Notes database at the default path because the stored bookmark doesn't resolve: \(error.localizedDescription)"
+            )
+            return try await operation(notesContainerURL)
+        }
+
+        // The grant must stay open until the operation returns:
+        // SQLite opens the write-ahead log lazily on the first statement.
+        guard directory.startAccessingSecurityScopedResource() else {
+            log.error("Failed to start accessing security-scoped resource")
+            throw DatabaseAccessError.securityScopeAccessFailed
+        }
+        defer { directory.stopAccessingSecurityScopedResource() }
+        return try await operation(directory)
     }
 
     // MARK: - Errors

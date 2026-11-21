@@ -207,25 +207,18 @@ enum NotesOrganizeInput {
     static let maximumBatch = 50
     static let maximumListed = 200
 
-    /// A note id as the scripting interface gives it, such as `x-coredata://…/ICNote/p12`.
-    static func validatedNoteID(_ id: String) throws -> String {
-        let id = id.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard id.hasPrefix("x-coredata://"), id.count <= 500,
-            !id.unicodeScalars.contains(where: { $0.properties.generalCategory == .control })
-        else {
-            throw NotesWriteError.invalid(
-                "id must be a note id as the Notes app reports it, starting with x-coredata://"
-            )
-        }
-        return id
+    /// A note named by its database UUID or by the id that the scripting interface gives it,
+    /// such as `x-coredata://…/ICNote/p12`.
+    static func validatedNoteReference(_ id: String) throws -> NotesReference {
+        try NotesReference.parse(id, label: "id", kind: .note)
     }
 
-    static func validatedNoteIDs(_ ids: [String]) throws -> [String] {
+    static func validatedNoteReferences(_ ids: [String]) throws -> [NotesReference] {
         guard !ids.isEmpty else { throw NotesWriteError.invalid("ids can't be empty") }
         guard ids.count <= maximumBatch else {
             throw NotesWriteError.invalid("ids can have at most \(maximumBatch) notes")
         }
-        return try ids.map(validatedNoteID)
+        return try ids.map(validatedNoteReference)
     }
 
     /// A folder that must exist: its path can't be empty.

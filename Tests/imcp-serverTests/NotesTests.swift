@@ -298,33 +298,4 @@ final class NotesTests: XCTestCase {
             )
         ) { XCTAssertTrue($0 is NoteTagsUnavailableError) }
     }
-
-    func testFindsTheFolderAndNoteAScriptCreated() {
-        let a = TopoText.Folder.ID("A")!
-        let b = TopoText.Folder.ID("B")!
-        let c = TopoText.Folder.ID("C")!
-        let nodes = [
-            FolderNode(id: a, name: "Work", parentID: nil, accountName: "iCloud"),
-            FolderNode(id: b, name: "Ideas", parentID: a, accountName: "iCloud"),
-            FolderNode(id: c, name: "Ideas", parentID: nil, accountName: "On My Mac"),
-        ]
-        XCTAssertEqual(
-            folderIDs(atPath: ["Work", "Ideas"], defaultFolderName: "", accountName: "iCloud", among: nodes),
-            [b]
-        )
-        XCTAssertEqual(folderIDs(atPath: [], defaultFolderName: "Ideas", accountName: "On My Mac", among: nodes), [c])
-
-        let now = Date()
-        let one = NoteCandidate(id: .init("1")!, title: "Plan", creationDate: now)
-        let old = NoteCandidate(id: .init("2")!, title: "Plan", creationDate: now.addingTimeInterval(-3_600))
-        let other = NoteCandidate(id: .init("3")!, title: "Plan B", creationDate: now)
-        XCTAssertEqual(
-            uniqueNewNoteID(title: "Plan", createdAfter: now.addingTimeInterval(-60), among: [one, old, other]),
-            .init("1")!
-        )
-        // Two new notes with the title: no guess.
-        let twin = NoteCandidate(id: .init("4")!, title: "Plan", creationDate: now)
-        XCTAssertNil(uniqueNewNoteID(title: "Plan", createdAfter: now.addingTimeInterval(-60), among: [one, twin]))
-        XCTAssertNil(uniqueNewNoteID(title: "Plan", createdAfter: now.addingTimeInterval(-60), among: [old]))
-    }
 }

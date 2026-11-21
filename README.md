@@ -973,6 +973,12 @@ The Notes service reads notes with TopoText and returns them as Markdown.
 Besides `notes_fetch` and `notes_read`,
 the service lists accounts, folders (with their paths), tags, attachments, and note counts.
 Each note has a `notes://showNote?identifier=` link that opens it in the Notes app.
+A note or folder has two ids: the UUID in the Notes database and the id that the Notes app's
+scripting interface uses, `x-coredata://…/ICNote/p12`.
+Every Notes tool takes either one, and a result that names a note or folder gives both,
+as `identifier` (the UUID, which the read tools also call `@id`) and `scriptIdentifier`.
+iMCP joins them by reading the Notes database's own rows, with no guessing from titles or dates,
+and a result leaves out `identifier` when the database can't be read.
 Filters on word counts and on what a note contains
 need to read each candidate note's contents,
 so a call reads the contents of at most 500 notes.

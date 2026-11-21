@@ -290,7 +290,10 @@ enum NotesHTMLToMarkdown {
 
 /// A note, ready to be written out in one of the export formats.
 struct NotesExportItem: Equatable, Sendable {
+    /// The id that the Notes app uses for the note.
     let id: String
+    /// The note's database UUID, when it is known.
+    let uuid: String?
     let title: String
     let folder: String
     let account: String
@@ -300,8 +303,9 @@ struct NotesExportItem: Equatable, Sendable {
     let bodyHTML: String
     let isPasswordProtected: Bool
 
-    init(_ note: NotesScriptNote) {
+    init(_ note: NotesScriptNote, uuid: String? = nil) {
         id = note.id
+        self.uuid = uuid
         title = note.title
         folder = note.folder
         account = note.account
@@ -335,7 +339,8 @@ enum NotesExporter {
 
     static func json(_ items: [NotesExportItem]) throws -> String {
         struct Entry: Encodable {
-            let id: String
+            let identifier: String?
+            let scriptIdentifier: String
             let title: String
             let folder: String
             let account: String
@@ -347,7 +352,8 @@ enum NotesExporter {
         }
         let entries = items.map {
             Entry(
-                id: $0.id,
+                identifier: $0.uuid,
+                scriptIdentifier: $0.id,
                 title: $0.title,
                 folder: $0.folder,
                 account: $0.account,
@@ -366,7 +372,9 @@ enum NotesExporter {
     /// Each note as Markdown after a block of front matter, with a line between notes.
     static func markdown(_ items: [NotesExportItem]) -> String {
         items.map { item in
-            var front = ["---", "title: \(quoted(item.title))", "id: \(quoted(item.id))"]
+            var front = ["---", "title: \(quoted(item.title))"]
+            if let uuid = item.uuid { front.append("id: \(quoted(uuid))") }
+            front.append("scriptId: \(quoted(item.id))")
             front.append("folder: \(quoted(item.folder))")
             front.append("account: \(quoted(item.account))")
             if let created = NotesDates.iso(item.created) { front.append("created: \(created)") }
@@ -383,7 +391,7 @@ enum NotesExporter {
                 .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " / ")
             let body = item.isPasswordProtected ? "<p>This note is locked with a password.</p>" : item.bodyHTML
             return """
-                <article data-note-id="\(NotesHTML.escape(item.id).replacingOccurrences(of: "\"", with: "&quot;"))">
+                <article data-note-id="\(attribute(item.uuid ?? item.id))" data-note-script-id="\(attribute(item.id))">
                 <p><small>\(NotesHTML.escape(meta))</small></p>
                 \(body)
                 </article>
@@ -398,6 +406,10 @@ enum NotesExporter {
             </body>
             </html>
             """
+    }
+
+    private static func attribute(_ text: String) -> String {
+        NotesHTML.escape(text).replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     /// A string in double quotes, which is valid YAML and JSON.

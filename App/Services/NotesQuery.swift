@@ -497,37 +497,3 @@ func searchNotes<Source: NoteSearchSource>(
     }
     return page
 }
-
-// MARK: - Finding what a script created
-
-/// The folders at `path` (names from the outermost folder) in the account, for finding a folder
-/// that the Notes scripting interface made. An empty path names the account's default folder,
-/// which is the top-level folder called `defaultFolderName`.
-func folderIDs(
-    atPath path: [String],
-    defaultFolderName: String,
-    accountName: String,
-    among folders: [FolderNode]
-) -> [TopoText.Folder.ID] {
-    folders.filter { node in
-        guard node.accountName == accountName else { return false }
-        if path.isEmpty { return node.name == defaultFolderName && node.parentID == nil }
-        return folderPath(of: node.id, in: folders) == path.joined(separator: "/")
-    }.map(\.id)
-}
-
-/// A note in the database, for finding the one that a script created.
-struct NoteCandidate: Sendable, Equatable {
-    var id: TopoText.Note.ID
-    var title: String
-    var creationDate: Date?
-}
-
-/// Returns the identifier of the one note with exactly this title that was created at or after `date`,
-/// or `nil` if there is none or more than one, so a guess never names the wrong note.
-func uniqueNewNoteID(title: String, createdAfter date: Date, among candidates: [NoteCandidate]) -> TopoText.Note.ID? {
-    let matches = candidates.filter { candidate in
-        candidate.title == title && (candidate.creationDate.map { $0 >= date } ?? false)
-    }
-    return matches.count == 1 ? matches[0].id : nil
-}

@@ -6,6 +6,15 @@ import os
 
 final class NotesOrganizeTests: XCTestCase {
     private let noteID = "x-coredata://ABC/ICNote/p12"
+    private let folderScriptID = "x-coredata://ABC/ICFolder/p3"
+    private let movedScriptID = "x-coredata://ABC/ICNote/p13"
+    private let noteUUID = "0F3A7C54-5B1E-4D0B-9C57-2E8D1A6B4F10"
+    private let folderUUID = "9B2E6D31-7A44-4C8F-8E0D-3C5A1F7B2D90"
+    private let movedUUID = "5D8C1B77-2E90-4A3F-B6C4-7F1A0E9D3B52"
+
+    private var knownIDs: FakeNotesIDMapper {
+        FakeNotesIDMapper(uuidByScriptID: [noteID: noteUUID, folderScriptID: folderUUID, movedScriptID: movedUUID])
+    }
 
     // MARK: - Fields
 
@@ -81,13 +90,14 @@ final class NotesOrganizeTests: XCTestCase {
 
     // MARK: - Input
 
-    func testNoteIDsMustBeCoreDataIDs() throws {
-        XCTAssertEqual(try NotesOrganizeInput.validatedNoteID(" \(noteID) "), noteID)
-        XCTAssertThrowsError(try NotesOrganizeInput.validatedNoteID("12"))
-        XCTAssertThrowsError(try NotesOrganizeInput.validatedNoteID("x-coredata://a\nb"))
-        XCTAssertThrowsError(try NotesOrganizeInput.validatedNoteIDs([]))
+    func testNoteIDsMustBeUUIDsOrCoreDataIDs() throws {
+        XCTAssertEqual(try NotesOrganizeInput.validatedNoteReference(" \(noteID) "), .script(noteID))
+        XCTAssertEqual(try NotesOrganizeInput.validatedNoteReference(noteUUID.lowercased()), .uuid(noteUUID))
+        XCTAssertThrowsError(try NotesOrganizeInput.validatedNoteReference("12"))
+        XCTAssertThrowsError(try NotesOrganizeInput.validatedNoteReference("x-coredata://a\nb"))
+        XCTAssertThrowsError(try NotesOrganizeInput.validatedNoteReferences([]))
         XCTAssertThrowsError(
-            try NotesOrganizeInput.validatedNoteIDs(
+            try NotesOrganizeInput.validatedNoteReferences(
                 Array(repeating: noteID, count: NotesOrganizeInput.maximumBatch + 1)
             )
         )
@@ -200,6 +210,8 @@ final class NotesOrganizeTests: XCTestCase {
             try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: Any]]
         )
         XCTAssertEqual(decoded.count, 3)
+        XCTAssertEqual(decoded[0]["scriptIdentifier"] as? String, noteID)
+        XCTAssertNil(decoded[0]["identifier"])
         XCTAssertEqual(decoded[1]["title"] as? String, "Two \"quoted\"")
         XCTAssertEqual(decoded[0]["plainText"] as? String, "One\nbody")
         XCTAssertEqual(decoded[2]["locked"] as? Bool, true)
@@ -207,7 +219,9 @@ final class NotesOrganizeTests: XCTestCase {
         let markdown = try NotesExporter.export(items, as: .markdown)
         XCTAssertTrue(markdown.contains("title: \"Two \\\"quoted\\\"\""))
         XCTAssertTrue(markdown.contains("# One\nbody"))
-        XCTAssertTrue(markdown.contains("id: \"x-coredata://ABC/ICNote/p12\""))
+        // Without a UUID, only the scripting id is given, and it isn't called `id`.
+        XCTAssertTrue(markdown.contains("scriptId: \"x-coredata://ABC/ICNote/p12\""))
+        XCTAssertFalse(markdown.contains("\nid:"))
 
         let html = try NotesExporter.export(items, as: .html)
         XCTAssertTrue(html.hasPrefix("<!DOCTYPE html>"))
@@ -246,12 +260,21 @@ final class NotesOrganizeTests: XCTestCase {
             switch subroutine.name {
             case "getNote":
                 return [
-                    "x-coredata://ABC/ICNote/p12", "Plan", "f", "Work", "2026-11-16T09:30:00", "2026-11-17T10:00:00",
+                    "x-coredata://ABC/ICNote/p12", "Plan", "x-coredata://ABC/ICFolder/p3", "Work",
+                    "2026-11-16T09:30:00", "2026-11-17T10:00:00",
                     plain, html, "false", shared ? "true" : "false", "0", "iCloud",
                 ]
             case "updateNote", "appendToNote": return ["x-coredata://ABC/ICNote/p12", "Plan", "2026-11-17T11:00:00"]
             case "deleteNote": return ["x-coredata://ABC/ICNote/p12", "Plan"]
             case "moveNote": return ["x-coredata://ABC/ICNote/p13", "Plan", "Archive"]
+            case "listNotes":
+                return [
+                    "x-coredata://ABC/ICNote/p12", "Plan", "Work", "x-coredata://ABC/ICFolder/p3",
+                    "2026-11-17T10:00:00",
+                ]
+            case "listFolders": return ["x-coredata://ABC/ICFolder/p3", "Work", "", "iCloud", "2"]
+            case "defaultLocation": return ["acct", "iCloud", "x-coredata://ABC/ICFolder/p3", "Notes"]
+            case "showNote": return ["x-coredata://ABC/ICNote/p12", "Plan"]
             default: return []
             }
         }
@@ -260,13 +283,15 @@ final class NotesOrganizeTests: XCTestCase {
     private func tools(
         enabled: Bool = true,
         runner: FakeRunner = FakeRunner(),
-        attachmentFolder: URL = NotesAttachmentFolder.defaultURL
+        attachmentFolder: URL = NotesAttachmentFolder.defaultURL,
+        mapper: FakeNotesIDMapper? = nil
     ) -> [String: Tool] {
         Dictionary(
             uniqueKeysWithValues: NotesOrganizeTools.tools(
                 isEnabled: { enabled },
                 runner: runner,
                 attachmentFolder: attachmentFolder,
+                mapper: mapper ?? knownIDs,
                 traitLookup: { _ in NoteTraits(content: TopoText.Note.Content(paragraphs: [])) }
             ).map { ($0.name, $0) }
         )
@@ -384,6 +409,7 @@ final class NotesOrganizeTests: XCTestCase {
             uniqueKeysWithValues: NotesOrganizeTools.tools(
                 isEnabled: { true },
                 runner: runner,
+                mapper: knownIDs,
                 traitLookup: lookup
             ).map { ($0.name, $0) }
         )
@@ -530,7 +556,187 @@ final class NotesOrganizeTests: XCTestCase {
         XCTAssertEqual(object["succeeded"]?.intValue, 1)
         XCTAssertEqual(object["failed"]?.intValue, 1)
         let rows = try XCTUnwrap(object["results"]?.arrayValue)
-        XCTAssertEqual(rows[0].objectValue?["newId"]?.stringValue, "x-coredata://ABC/ICNote/p13")
+        XCTAssertEqual(rows[0].objectValue?["scriptIdentifier"]?.stringValue, movedScriptID)
+        XCTAssertEqual(rows[0].objectValue?["identifier"]?.stringValue, movedUUID)
         XCTAssertEqual(rows[1].objectValue?["ok"]?.boolValue, false)
+    }
+
+    // MARK: - Either id
+
+    /// The notes that a script was asked about, as the Notes app names them.
+    private func scriptedNotes(_ runner: FakeRunner) -> [String] {
+        runner.recorded.compactMap { call in
+            if case .string(let id)? = call.parameters.first, id.hasPrefix("x-coredata://") { return id }
+            return nil
+        }
+    }
+
+    func testEveryToolThatTakesANoteTakesEitherIDAndScriptsTheNotesAppsID() async throws {
+        let hash = NotesContentHash.hash(of: "Plan\nline")
+        let calls: [(String, [String: Value])] = [
+            ("notes_get", [:]), ("notes_show", [:]), ("notes_list_attachments", [:]), ("notes_markdown", [:]),
+            ("notes_delete", [:]), ("notes_move", ["folder": "Archive"]),
+            ("notes_append", ["text": "x"]),
+            ("notes_update", ["expectedContentHash": .string(hash), "body": "x"]),
+        ]
+        for given in [noteID, noteUUID, noteUUID.lowercased()] {
+            for (name, extra) in calls {
+                let runner = FakeRunner()
+                var arguments = extra
+                arguments["id"] = .string(given)
+                _ = try await tools(runner: runner)[name]!(arguments)
+                let scripted = scriptedNotes(runner)
+                XCTAssertFalse(scripted.isEmpty, "\(name) \(given)")
+                XCTAssertTrue(scripted.allSatisfy { $0 == noteID }, "\(name) \(given): \(scripted)")
+                XCTAssertFalse(
+                    runner.recorded.contains { $0.parameters.first == .string(given) && given != noteID },
+                    "\(name) sent the UUID to the Notes app"
+                )
+            }
+        }
+    }
+
+    func testTheAttachmentToolsAndExportTakeEitherID() async throws {
+        let (root, folder, _) = try makeFolder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try Data("a".utf8).write(to: folder.appendingPathComponent("a.txt"))
+        let runner = FakeRunner()
+        let all = tools(runner: runner, attachmentFolder: folder)
+        let added = try await all["notes_add_attachment"]!([
+            "id": .string(noteUUID), "path": .string(folder.path + "/a.txt"),
+        ])
+        _ = try await all["notes_save_attachment"]!([
+            "id": .string(noteUUID), "attachmentId": "a", "path": .string(folder.path + "/out.png"),
+        ])
+        let exported = try await all["notes_export"]!([
+            "format": "json", "ids": [.string(noteUUID), .string(noteID)],
+        ])
+        XCTAssertTrue(scriptedNotes(runner).allSatisfy { $0 == noteID })
+        XCTAssertEqual(scriptedNotes(runner).count, 4)
+        XCTAssertEqual(added.objectValue?["note"]?.objectValue?["identifier"]?.stringValue, noteUUID)
+        XCTAssertEqual(added.objectValue?["note"]?.objectValue?["scriptIdentifier"]?.stringValue, noteID)
+        let text = try XCTUnwrap(exported.objectValue?["text"]?.stringValue)
+        let entries = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+        XCTAssertEqual(entries.compactMap { $0["identifier"] as? String }, [noteUUID, noteUUID])
+        XCTAssertEqual(entries.compactMap { $0["scriptIdentifier"] as? String }, [noteID, noteID])
+    }
+
+    func testResultsCarryBothIDs() async throws {
+        let all = tools()
+        let hash = NotesContentHash.hash(of: "Plan\nline")
+        let get = try await all["notes_get"]!(["id": .string(noteID)]).objectValue
+        XCTAssertEqual(get?["identifier"]?.stringValue, noteUUID)
+        XCTAssertEqual(get?["scriptIdentifier"]?.stringValue, noteID)
+        XCTAssertEqual(get?["folderIdentifier"]?.stringValue, folderUUID)
+        XCTAssertEqual(get?["folderScriptIdentifier"]?.stringValue, folderScriptID)
+
+        let results: [(String, Value)] = [
+            (
+                "update",
+                try await all["notes_update"]!([
+                    "id": .string(noteUUID), "expectedContentHash": .string(hash), "body": "x",
+                ])
+            ),
+            ("append", try await all["notes_append"]!(["id": .string(noteID), "text": "x"])),
+            ("delete", try await all["notes_delete"]!(["id": .string(noteID)])),
+            ("show", try await all["notes_show"]!(["id": .string(noteID)])),
+        ]
+        for (label, value) in results {
+            XCTAssertEqual(value.objectValue?["identifier"]?.stringValue, noteUUID, label)
+            XCTAssertEqual(value.objectValue?["scriptIdentifier"]?.stringValue, noteID, label)
+        }
+
+        // A move can give the note a new id, which is named by its own pair.
+        let moved = try await all["notes_move"]!(["id": .string(noteUUID), "folder": "Archive"]).objectValue
+        XCTAssertEqual(moved?["identifier"]?.stringValue, movedUUID)
+        XCTAssertEqual(moved?["scriptIdentifier"]?.stringValue, movedScriptID)
+
+        let recent = try await all["notes_list_recent"]!([:]).objectValue?["itemListElement"]?.arrayValue?.first?
+            .objectValue
+        XCTAssertEqual(recent?["identifier"]?.stringValue, noteUUID)
+        XCTAssertEqual(recent?["scriptIdentifier"]?.stringValue, noteID)
+        XCTAssertEqual(recent?["folderIdentifier"]?.stringValue, folderUUID)
+
+        let tree = try await all["notes_folder_tree"]!([:]).objectValue?["itemListElement"]?.arrayValue?.first?
+            .objectValue
+        XCTAssertEqual(tree?["identifier"]?.stringValue, folderUUID)
+        XCTAssertEqual(tree?["scriptIdentifier"]?.stringValue, folderScriptID)
+
+        let location = try await all["notes_default_location"]!([:]).objectValue?["folder"]?.objectValue
+        XCTAssertEqual(location?["identifier"]?.stringValue, folderUUID)
+        XCTAssertEqual(location?["scriptIdentifier"]?.stringValue, folderScriptID)
+    }
+
+    func testResultsKeepTheScriptIDAndOmitTheUUIDTheyCantResolve() async throws {
+        let all = tools(mapper: FakeNotesIDMapper())
+        let get = try await all["notes_get"]!(["id": .string(noteID)]).objectValue
+        XCTAssertEqual(get?["scriptIdentifier"]?.stringValue, noteID)
+        XCTAssertNil(get?["identifier"])
+        XCTAssertNil(get?["folderIdentifier"])
+        XCTAssertEqual(get?["folderScriptIdentifier"]?.stringValue, folderScriptID)
+
+        let broken = tools(mapper: FakeNotesIDMapper(failure: .unavailable("no access")))
+        let hash = NotesContentHash.hash(of: "Plan\nline")
+        let update = try await broken["notes_update"]!([
+            "id": .string(noteID), "expectedContentHash": .string(hash), "body": "x",
+        ]).objectValue
+        XCTAssertEqual(update?["scriptIdentifier"]?.stringValue, noteID)
+        XCTAssertNil(update?["identifier"])
+        let folders = try await broken["notes_folder_tree"]!([:]).objectValue
+        XCTAssertEqual(
+            folders?["itemListElement"]?.arrayValue?.first?.objectValue?["scriptIdentifier"]?.stringValue,
+            folderScriptID
+        )
+    }
+
+    func testAUUIDThatCantBeTranslatedChangesNothing() async throws {
+        let runner = FakeRunner()
+        let stranger = "6C2E9D18-3F7A-4B50-A1D4-8E0B5F2C7A93"
+        for mapper in [FakeNotesIDMapper(), FakeNotesIDMapper(failure: .unavailable("no access"))] {
+            let all = tools(runner: runner, mapper: mapper)
+            for name in ["notes_delete", "notes_get", "notes_append"] {
+                do {
+                    _ = try await all[name]!(["id": .string(stranger), "text": "x"])
+                    XCTFail("\(name) ran")
+                } catch {
+                    XCTAssertNotNil(error as? NotesWriteError, "\(name)")
+                }
+            }
+        }
+        XCTAssertTrue(runner.recorded.isEmpty)
+        // The Notes app's own id needs no translation, so it works while the database can't be read.
+        let broken = tools(runner: runner, mapper: FakeNotesIDMapper(failure: .unavailable("no access")))
+        _ = try await broken["notes_delete"]!(["id": .string(noteID)])
+        XCTAssertEqual(runner.recorded.map(\.name), ["deleteNote"])
+    }
+
+    func testABatchWithAnUnknownUUIDFailsOnlyThatNote() async throws {
+        let runner = FakeRunner()
+        let stranger = "6C2E9D18-3F7A-4B50-A1D4-8E0B5F2C7A93"
+        let result = try await tools(runner: runner)["notes_batch_delete"]!([
+            "ids": [.string(noteUUID), .string(stranger), .string(movedScriptID)]
+        ])
+        let object = try XCTUnwrap(result.objectValue)
+        XCTAssertEqual(object["succeeded"]?.intValue, 2)
+        XCTAssertEqual(object["failed"]?.intValue, 1)
+        let rows = try XCTUnwrap(object["results"]?.arrayValue)
+        XCTAssertEqual(rows[0].objectValue?["identifier"]?.stringValue, noteUUID)
+        XCTAssertEqual(rows[0].objectValue?["scriptIdentifier"]?.stringValue, noteID)
+        XCTAssertEqual(rows[1].objectValue?["ok"]?.boolValue, false)
+        XCTAssertNil(rows[1].objectValue?["scriptIdentifier"])
+        XCTAssertEqual(rows[2].objectValue?["scriptIdentifier"]?.stringValue, movedScriptID)
+        XCTAssertEqual(scriptedNotes(runner), [noteID, movedScriptID])
+    }
+
+    func testDescriptionsSayBothIDsAreAccepted() throws {
+        for tool in tools().values {
+            let schema = try JSONSerialization.jsonObject(with: JSONEncoder().encode(tool.inputSchema))
+            let properties = (schema as? [String: Any])?["properties"] as? [String: Any]
+            guard let id = properties?["id"] as? [String: Any] else { continue }
+            let description = try XCTUnwrap(id["description"] as? String, tool.name)
+            XCTAssertTrue(description.contains("UUID"), tool.name)
+            XCTAssertTrue(description.contains("x-coredata://"), tool.name)
+        }
+        XCTAssertFalse(tools().values.contains { $0.description.contains("as returned by notes_create") })
     }
 }

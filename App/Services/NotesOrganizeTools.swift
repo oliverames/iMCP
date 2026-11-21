@@ -4,9 +4,10 @@ import MCP
 
 /// The tools that find, edit, organize, export, and attach files to notes through the Notes app.
 ///
-/// Notes are named here by the id that the Notes app gives them, such as `x-coredata://…/ICNote/p12`,
-/// which `notes_create`, `notes_list_recent`, and `notes_get` return.
-/// They are not the `@id` of the tools that read the database.
+/// A note is named by either of its two ids: the database UUID that the tools reading the database call `@id`
+/// (and that these tools return as `identifier`), or the id that the Notes app gives it, such as
+/// `x-coredata://…/ICNote/p12` (returned as `scriptIdentifier`). A UUID is turned into the Notes app's id
+/// before the script runs, through `NotesIDMapping`.
 enum NotesOrganizeTools {
     /// The tools that change something, and so are offered only while the person allows changes.
     static let writeToolNames: Set<String> = [
@@ -29,7 +30,7 @@ enum NotesOrganizeTools {
     private static let idValue: JSONSchema =
         .string(
             description:
-                "The note's id as the Notes app gives it, such as x-coredata://…/ICNote/p12, as returned by notes_create, notes_list_recent, and notes_get"
+                "The note's id: either its UUID (the identifier or @id that any Notes tool returns) or the Notes app's id such as x-coredata://…/ICNote/p12 (scriptIdentifier)"
         )
     private static let changesNotice =
         "Allowed only while iMCP's Notes settings allow changes."
@@ -40,25 +41,27 @@ enum NotesOrganizeTools {
         isEnabled: @escaping @Sendable () -> Bool,
         runner: any NotesScriptRunning,
         attachmentFolder: URL = NotesAttachmentFolder.defaultURL,
+        mapper: any NotesIDMapping,
         traitLookup: @escaping NotesTraitLookup
     ) -> [Tool] {
-        readTools(runner: runner)
+        readTools(runner: runner, mapper: mapper)
             + writeTools(
                 isEnabled: isEnabled,
                 runner: runner,
                 attachmentFolder: attachmentFolder,
+                mapper: mapper,
                 traitLookup: traitLookup
             )
     }
 
     // MARK: - Reading
 
-    static func readTools(runner: any NotesScriptRunning) -> [Tool] {
+    static func readTools(runner: any NotesScriptRunning, mapper: any NotesIDMapping) -> [Tool] {
         [
             Tool(
                 name: "notes_get",
                 description:
-                    "Read one note through the Notes app by its id: title, folder, account, dates, plain text, and a contentHash of the text. Pass the contentHash back as expectedContentHash to notes_update or notes_append so that a write is refused if the note changed. Set includeHTML for the note's HTML. A note locked with a password has no text.",
+                    "Read one note through the Notes app by its id (UUID or x-coredata:// id): title, folder, account, dates, plain text, and a contentHash of the text. Pass the contentHash back as expectedContentHash to notes_update or notes_append so that a write is refused if the note changed. Set includeHTML for the note's HTML. A note locked with a password has no text.",
                 inputSchema: .object(
                     properties: [
                         "id": idValue,
@@ -69,8 +72,9 @@ enum NotesOrganizeTools {
                 ),
                 annotations: .init(title: "Get Note", readOnlyHint: true, openWorldHint: false)
             ) { arguments in
-                let note = try await fetchNote(try requiredID(in: arguments), runner: runner)
-                var object = noteValue(note)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let note = try await fetchNote(resolved.scriptID, runner: runner)
+                var object = noteValue(note, uuids: await mapper.uuids(forResultIDs: [note.id, note.folderID]))
                 if try bool("includeHTML", in: arguments) ?? false { object["html"] = .string(note.bodyHTML) }
                 return Value.object(object)
             },
@@ -78,7 +82,7 @@ enum NotesOrganizeTools {
             Tool(
                 name: "notes_list_recent",
                 description:
-                    "List the notes that changed most recently, newest first, with id, title, folder, and modified date. Notes in Recently Deleted are left out. Scan one folder, or the whole account.",
+                    "List the notes that changed most recently, newest first, with identifier (UUID), scriptIdentifier, title, folder, and modified date. Notes in Recently Deleted are left out. Scan one folder, or the whole account.",
                 inputSchema: .object(
                     properties: [
                         "limit": .integer(
@@ -105,13 +109,14 @@ enum NotesOrganizeTools {
                     calling: NotesOrganizeScripts.listNotes(account: account, folder: path)
                 )
                 let recent = NotesScriptSummary.recent(try NotesScriptSummary.list(from: fields), limit: limit)
-                return summaries(recent, name: "Recent Notes")
+                let uuids = await mapper.uuids(forResultIDs: recent.flatMap { [$0.id, $0.folderID] })
+                return summaries(recent, name: "Recent Notes", uuids: uuids)
             },
 
             Tool(
                 name: "notes_selected",
                 description:
-                    "List the notes that are selected in the Notes window, with id, title, folder, and modified date.",
+                    "List the notes that are selected in the Notes window, with identifier (UUID), scriptIdentifier, title, folder, and modified date.",
                 inputSchema: .object(properties: [:], additionalProperties: false),
                 annotations: .init(title: "Get Selected Notes", readOnlyHint: true, openWorldHint: false)
             ) { _ in
@@ -119,12 +124,15 @@ enum NotesOrganizeTools {
                     NotesOrganizeScripts.source,
                     calling: NotesOrganizeScripts.selectedNotes
                 )
-                return summaries(try NotesScriptSummary.list(from: fields), name: "Selected Notes")
+                let selected = try NotesScriptSummary.list(from: fields)
+                let uuids = await mapper.uuids(forResultIDs: selected.flatMap { [$0.id, $0.folderID] })
+                return summaries(selected, name: "Selected Notes", uuids: uuids)
             },
 
             Tool(
                 name: "notes_folder_tree",
-                description: "List an account's folders as a tree, with each folder's id and how many notes it holds.",
+                description:
+                    "List an account's folders as a tree, with each folder's identifier (UUID), scriptIdentifier, and how many notes it holds.",
                 inputSchema: .object(properties: ["account": accountValue], additionalProperties: false),
                 annotations: .init(title: "Get Note Folder Tree", readOnlyHint: true, openWorldHint: false)
             ) { arguments in
@@ -133,15 +141,16 @@ enum NotesOrganizeTools {
                     NotesOrganizeScripts.source,
                     calling: NotesOrganizeScripts.listFolders(account: account)
                 )
-                let tree = NotesScriptFolder.tree(try NotesScriptFolder.list(from: fields))
+                let folders = try NotesScriptFolder.list(from: fields)
+                let uuids = await mapper.uuids(forResultIDs: folders.map(\.id))
+                let tree = NotesScriptFolder.tree(folders)
                 func value(_ node: NotesScriptFolder.Node) -> Value {
-                    [
-                        "identifier": .string(node.folder.id),
-                        "name": .string(node.folder.name),
-                        "account": .string(node.folder.account),
-                        "noteCount": .int(node.folder.noteCount),
-                        "folders": .array(node.children.map(value)),
-                    ]
+                    var object = NotesIdentifiers.fields(node.folder.id, uuids: uuids)
+                    object["name"] = .string(node.folder.name)
+                    object["account"] = .string(node.folder.account)
+                    object["noteCount"] = .int(node.folder.noteCount)
+                    object["folders"] = .array(node.children.map(value))
+                    return Value.object(object)
                 }
                 return [
                     "@context": "https://schema.org",
@@ -164,9 +173,14 @@ enum NotesOrganizeTools {
                 guard fields.count == 4 else {
                     throw NotesWriteError.scriptFailed("Notes returned an unexpected answer")
                 }
+                var folder = NotesIdentifiers.fields(
+                    fields[2],
+                    uuids: await mapper.uuids(forResultIDs: [fields[2]])
+                )
+                folder["name"] = .string(fields[3])
                 return [
                     "account": ["identifier": .string(fields[0]), "name": .string(fields[1])],
-                    "folder": ["identifier": .string(fields[2]), "name": .string(fields[3])],
+                    "folder": .object(folder),
                 ] as Value
             },
 
@@ -176,11 +190,16 @@ enum NotesOrganizeTools {
                 inputSchema: .object(properties: ["id": idValue], required: ["id"], additionalProperties: false),
                 annotations: .init(title: "Show Note", readOnlyHint: true, openWorldHint: false)
             ) { arguments in
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
                 let fields = try await runner.run(
                     NotesOrganizeScripts.source,
-                    calling: NotesOrganizeScripts.showNote(try requiredID(in: arguments))
+                    calling: NotesOrganizeScripts.showNote(resolved.scriptID)
                 )
-                return ["shown": .string(fields.first ?? ""), "name": .string(fields.dropFirst().first ?? "")] as Value
+                var object: [String: Value] = [
+                    "shown": .string(fields.first ?? ""), "name": .string(fields.dropFirst().first ?? ""),
+                ]
+                object.merge(await identifiers(fields.first ?? "", known: resolved, mapper: mapper)) { $1 }
+                return Value.object(object)
             },
 
             Tool(
@@ -202,7 +221,11 @@ enum NotesOrganizeTools {
                     NotesOrganizeScripts.source,
                     calling: NotesOrganizeScripts.showFolder(account: account, folder: path)
                 )
-                return ["shown": .string(fields.first ?? ""), "name": .string(fields.dropFirst().first ?? "")] as Value
+                var object: [String: Value] = [
+                    "shown": .string(fields.first ?? ""), "name": .string(fields.dropFirst().first ?? ""),
+                ]
+                object.merge(await identifiers(fields.first ?? "", mapper: mapper)) { $1 }
+                return Value.object(object)
             },
 
             Tool(
@@ -212,9 +235,10 @@ enum NotesOrganizeTools {
                 inputSchema: .object(properties: ["id": idValue], required: ["id"], additionalProperties: false),
                 annotations: .init(title: "List Note Attachments", readOnlyHint: true, openWorldHint: false)
             ) { arguments in
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
                 let fields = try await runner.run(
                     NotesOrganizeScripts.source,
-                    calling: NotesOrganizeScripts.listAttachments(try requiredID(in: arguments))
+                    calling: NotesOrganizeScripts.listAttachments(resolved.scriptID)
                 )
                 let attachments = try NotesScriptAttachment.list(from: fields)
                 return [
@@ -227,7 +251,7 @@ enum NotesOrganizeTools {
                             if !$0.contentID.isEmpty { object["contentIdentifier"] = .string($0.contentID) }
                             if !$0.url.isEmpty { object["url"] = .string($0.url) }
                             if let created = NotesDates.iso($0.created) { object["dateCreated"] = .string(created) }
-                            return .object(object)
+                            return Value.object(object)
                         }
                     ),
                 ] as Value
@@ -240,8 +264,9 @@ enum NotesOrganizeTools {
                 inputSchema: .object(properties: ["id": idValue], required: ["id"], additionalProperties: false),
                 annotations: .init(title: "Get Note as Markdown", readOnlyHint: true, openWorldHint: false)
             ) { arguments in
-                let note = try await fetchNote(try requiredID(in: arguments), runner: runner)
-                var object = noteValue(note)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let note = try await fetchNote(resolved.scriptID, runner: runner)
+                var object = noteValue(note, uuids: await mapper.uuids(forResultIDs: [note.id, note.folderID]))
                 object["encodingFormat"] = "text/markdown"
                 object["text"] = .string(NotesExporter.markdown(NotesExportItem(note)))
                 return Value.object(object)
@@ -250,7 +275,7 @@ enum NotesOrganizeTools {
             Tool(
                 name: "notes_export",
                 description:
-                    "Export notes as JSON, Markdown, or HTML, returned as text. Name the notes by id, or give a folder to export its notes, newest first. Markdown notes start with front matter; JSON keeps each note's HTML and plain text.",
+                    "Export notes as JSON, Markdown, or HTML, returned as text. Name the notes by id (UUID or x-coredata:// id), or give a folder to export its notes, newest first. Markdown notes start with front matter; JSON keeps each note's HTML and plain text.",
                 inputSchema: .object(
                     properties: [
                         "format": .string(
@@ -258,7 +283,8 @@ enum NotesOrganizeTools {
                             enum: NotesExportFormat.allCases.map { .string($0.rawValue) }
                         ),
                         "ids": .array(
-                            description: "Notes to export, by id, at most \(NotesOrganizeInput.maximumBatch)",
+                            description:
+                                "Notes to export, by UUID or x-coredata:// id, at most \(NotesOrganizeInput.maximumBatch)",
                             items: .string()
                         ),
                         "folder": .string(description: "A folder to export, written as Parent/Child, in place of ids"),
@@ -282,7 +308,11 @@ enum NotesOrganizeTools {
                 }
                 var ids: [String]
                 if let given = try strings("ids", in: arguments) {
-                    ids = try NotesOrganizeInput.validatedNoteIDs(given)
+                    let references = try NotesOrganizeInput.validatedNoteReferences(given)
+                    ids = []
+                    for result in await mapper.resolve(references, kind: .note) {
+                        ids.append(try result.get().scriptID)
+                    }
                 } else if let folder = try string("folder", in: arguments) {
                     let path = try NotesOrganizeInput.requiredFolderPath(folder)
                     let account = try string("account", in: arguments).map(NotesWriteInput.validatedAccount)
@@ -295,8 +325,10 @@ enum NotesOrganizeTools {
                 } else {
                     throw NotesWriteError.invalid("give ids or a folder")
                 }
-                var items: [NotesExportItem] = []
-                for id in ids { items.append(NotesExportItem(try await fetchNote(id, runner: runner))) }
+                var notes: [NotesScriptNote] = []
+                for id in ids { notes.append(try await fetchNote(id, runner: runner)) }
+                let uuids = await mapper.uuids(forResultIDs: notes.map(\.id))
+                let items = notes.map { NotesExportItem($0, uuid: uuids[$0.id]) }
                 return [
                     "format": .string(format.rawValue),
                     "numberOfItems": .int(items.count),
@@ -312,6 +344,7 @@ enum NotesOrganizeTools {
         isEnabled: @escaping @Sendable () -> Bool,
         runner: any NotesScriptRunning,
         attachmentFolder: URL = NotesAttachmentFolder.defaultURL,
+        mapper: any NotesIDMapping,
         traitLookup: @escaping NotesTraitLookup
     ) -> [Tool] {
         let formatValue: JSONSchema =
@@ -350,7 +383,8 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let id = try requiredID(in: arguments)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let id = resolved.scriptID
                 let note = try await fetchNote(id, runner: runner)
                 try await NotesRewriteGuard.requireSafeToRewrite(note, tool: "notes_update", lookup: traitLookup)
                 try NotesContentHash.requireCurrent(
@@ -373,7 +407,7 @@ enum NotesOrganizeTools {
                         bodyHTML: request.bodyHTML
                     )
                 )
-                return try writeResult(fields)
+                return try await writeResult(fields, known: resolved, mapper: mapper)
             },
 
             Tool(
@@ -401,7 +435,8 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let id = try requiredID(in: arguments)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let id = resolved.scriptID
                 let text = try NotesWriteInput.validatedBody(try requiredString("text", in: arguments))
                 let html =
                     switch try format(in: arguments) {
@@ -421,7 +456,7 @@ enum NotesOrganizeTools {
                     NotesOrganizeScripts.source,
                     calling: NotesOrganizeScripts.appendToNote(id: id, expectedPlainText: expected, additionHTML: html)
                 )
-                return try writeResult(fields)
+                return try await writeResult(fields, known: resolved, mapper: mapper)
             },
 
             Tool(
@@ -437,18 +472,21 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let id = try requiredID(in: arguments)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let id = resolved.scriptID
                 let fields = try await runner.run(
                     NotesOrganizeScripts.source,
                     calling: NotesOrganizeScripts.deleteNote(id)
                 )
-                return ["deleted": .string(id), "name": .string(fields.dropFirst().first ?? "")] as Value
+                var object: [String: Value] = ["deleted": .string(id), "name": .string(fields.dropFirst().first ?? "")]
+                object.merge(await identifiers(id, known: resolved, mapper: mapper)) { $1 }
+                return Value.object(object)
             },
 
             Tool(
                 name: "notes_move",
                 description:
-                    "Move a note into a folder that exists. The note's id can change when it moves to another account, so use the id in the result. \(changesNotice)",
+                    "Move a note into a folder that exists. The note's ids can change when it moves to another account, so use the ids in the result. \(changesNotice)",
                 inputSchema: .object(
                     properties: [
                         "id": idValue,
@@ -466,7 +504,8 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let id = try requiredID(in: arguments)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let id = resolved.scriptID
                 let path = try NotesOrganizeInput.requiredFolderPath(try requiredString("folder", in: arguments))
                 let account = try string("account", in: arguments).map(NotesWriteInput.validatedAccount)
                 let fields = try await runner.run(
@@ -476,8 +515,9 @@ enum NotesOrganizeTools {
                 guard fields.count >= 3 else {
                     throw NotesWriteError.scriptFailed("Notes returned an unexpected answer")
                 }
-                return ["identifier": .string(fields[0]), "name": .string(fields[1]), "folder": .string(fields[2])]
-                    as Value
+                var object: [String: Value] = ["name": .string(fields[1]), "folder": .string(fields[2])]
+                object.merge(await identifiers(fields[0], known: resolved, mapper: mapper)) { $1 }
+                return Value.object(object)
             },
 
             Tool(
@@ -511,8 +551,9 @@ enum NotesOrganizeTools {
                     NotesOrganizeScripts.source,
                     calling: NotesOrganizeScripts.renameFolder(account: account, folder: path, newName: newName)
                 )
-                return ["identifier": .string(fields.first ?? ""), "name": .string(fields.dropFirst().first ?? "")]
-                    as Value
+                var object: [String: Value] = ["name": .string(fields.dropFirst().first ?? "")]
+                object.merge(await identifiers(fields.first ?? "", mapper: mapper)) { $1 }
+                return Value.object(object)
             },
 
             Tool(
@@ -549,10 +590,12 @@ enum NotesOrganizeTools {
                 guard fields.count >= 4 else {
                     throw NotesWriteError.scriptFailed("Notes returned an unexpected answer")
                 }
-                return [
+                var object: [String: Value] = [
                     "deleted": .string(fields[0]), "name": .string(fields[1]),
                     "notes": .int(Int(fields[2]) ?? 0), "folders": .int(Int(fields[3]) ?? 0),
-                ] as Value
+                ]
+                object.merge(await identifiers(fields[0], mapper: mapper)) { $1 }
+                return Value.object(object)
             },
 
             Tool(
@@ -560,7 +603,7 @@ enum NotesOrganizeTools {
                 description:
                     "Move up to \(NotesOrganizeInput.maximumBatch) notes to Recently Deleted. Each note has its own result, so one that fails doesn't stop the others. \(changesNotice)",
                 inputSchema: .object(
-                    properties: ["ids": .array(description: "The notes' ids", items: .string())],
+                    properties: ["ids": .array(description: "The notes' UUIDs or x-coredata:// ids", items: .string())],
                     required: ["ids"],
                     additionalProperties: false
                 ),
@@ -572,17 +615,23 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let ids = try NotesOrganizeInput.validatedNoteIDs(try strings("ids", in: arguments) ?? [])
+                let references = try NotesOrganizeInput.validatedNoteReferences(try strings("ids", in: arguments) ?? [])
+                let resolved = await mapper.resolve(references, kind: .note)
                 var results: [Value] = []
-                for id in ids {
+                for (reference, outcome) in zip(references, resolved) {
                     do {
+                        let note = try outcome.get()
                         _ = try await runner.run(
                             NotesOrganizeScripts.source,
-                            calling: NotesOrganizeScripts.deleteNote(id)
+                            calling: NotesOrganizeScripts.deleteNote(note.scriptID)
                         )
-                        results.append(["id": .string(id), "ok": true])
+                        var object: [String: Value] = ["id": .string(reference.text), "ok": true]
+                        object.merge(await identifiers(note.scriptID, known: note, mapper: mapper)) { $1 }
+                        results.append(.object(object))
                     } catch {
-                        results.append(["id": .string(id), "ok": false, "error": .string(error.localizedDescription)])
+                        results.append(
+                            ["id": .string(reference.text), "ok": false, "error": .string(error.localizedDescription)]
+                        )
                     }
                 }
                 return batch(results)
@@ -594,7 +643,7 @@ enum NotesOrganizeTools {
                     "Move up to \(NotesOrganizeInput.maximumBatch) notes into a folder that exists. Each note has its own result. \(changesNotice)",
                 inputSchema: .object(
                     properties: [
-                        "ids": .array(description: "The notes' ids", items: .string()),
+                        "ids": .array(description: "The notes' UUIDs or x-coredata:// ids", items: .string()),
                         "folder": .string(description: "The destination folder, written as Parent/Child"),
                         "account": accountValue,
                     ],
@@ -609,19 +658,27 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let ids = try NotesOrganizeInput.validatedNoteIDs(try strings("ids", in: arguments) ?? [])
+                let references = try NotesOrganizeInput.validatedNoteReferences(try strings("ids", in: arguments) ?? [])
                 let path = try NotesOrganizeInput.requiredFolderPath(try requiredString("folder", in: arguments))
                 let account = try string("account", in: arguments).map(NotesWriteInput.validatedAccount)
+                let resolved = await mapper.resolve(references, kind: .note)
                 var results: [Value] = []
-                for id in ids {
+                for (reference, outcome) in zip(references, resolved) {
                     do {
+                        let note = try outcome.get()
                         let fields = try await runner.run(
                             NotesOrganizeScripts.source,
-                            calling: NotesOrganizeScripts.moveNote(id: id, account: account, folder: path)
+                            calling: NotesOrganizeScripts.moveNote(id: note.scriptID, account: account, folder: path)
                         )
-                        results.append(["id": .string(id), "ok": true, "newId": .string(fields.first ?? id)])
+                        var object: [String: Value] = ["id": .string(reference.text), "ok": true]
+                        object.merge(await identifiers(fields.first ?? note.scriptID, known: note, mapper: mapper)) {
+                            $1
+                        }
+                        results.append(.object(object))
                     } catch {
-                        results.append(["id": .string(id), "ok": false, "error": .string(error.localizedDescription)])
+                        results.append(
+                            ["id": .string(reference.text), "ok": false, "error": .string(error.localizedDescription)]
+                        )
                     }
                 }
                 return batch(results)
@@ -651,7 +708,8 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let id = try requiredID(in: arguments)
+                let resolved = try await requiredNote(in: arguments, mapper: mapper)
+                let id = resolved.scriptID
                 var path: String
                 var cleanup: URL?
                 if let given = try string("path", in: arguments) {
@@ -674,7 +732,7 @@ enum NotesOrganizeTools {
                 )
                 return [
                     "identifier": .string(fields.first ?? ""), "name": .string(fields.dropFirst().first ?? ""),
-                    "note": .string(id),
+                    "note": .object(await identifiers(id, known: resolved, mapper: mapper)),
                 ] as Value
             },
 
@@ -701,7 +759,7 @@ enum NotesOrganizeTools {
                 )
             ) { arguments in
                 try NotesWriteTools.requireEnabled(isEnabled())
-                let id = try requiredID(in: arguments)
+                let id = try await requiredNote(in: arguments, mapper: mapper).scriptID
                 let attachment = try requiredString("attachmentId", in: arguments)
                 let path = try NotesAttachmentFolder.resolveNew(
                     try NotesOrganizeInput.validatedPath(
@@ -729,19 +787,21 @@ enum NotesOrganizeTools {
         return try NotesScriptNote(fields: fields)
     }
 
-    static func noteValue(_ note: NotesScriptNote) -> [String: Value] {
+    static func noteValue(_ note: NotesScriptNote, uuids: [String: String]) -> [String: Value] {
         var object: [String: Value] = [
             "@context": "https://schema.org",
             "@type": "NoteDigitalDocument",
-            "identifier": .string(note.id),
             "name": .string(note.title),
             "folder": .string(note.folder),
-            "folderIdentifier": .string(note.folderID),
             "account": .string(note.account),
             "locked": .bool(note.isPasswordProtected),
             "shared": .bool(note.isShared),
             "attachmentCount": .int(note.attachmentCount),
         ]
+        object.merge(NotesIdentifiers.fields(note.id, uuids: uuids)) { $1 }
+        if !note.folderID.isEmpty {
+            object.merge(NotesIdentifiers.fields(note.folderID, uuids: uuids, prefix: "folder")) { $1 }
+        }
         if let created = NotesDates.iso(note.created) { object["dateCreated"] = .string(created) }
         if let modified = NotesDates.iso(note.modified) { object["dateModified"] = .string(modified) }
         if !note.isPasswordProtected {
@@ -751,7 +811,7 @@ enum NotesOrganizeTools {
         return object
     }
 
-    private static func summaries(_ notes: [NotesScriptSummary], name: String) -> Value {
+    private static func summaries(_ notes: [NotesScriptSummary], name: String, uuids: [String: String]) -> Value {
         [
             "@context": "https://schema.org",
             "@type": "ItemList",
@@ -761,12 +821,15 @@ enum NotesOrganizeTools {
                 notes.map { note in
                     var object: [String: Value] = [
                         "@type": "NoteDigitalDocument",
-                        "identifier": .string(note.id),
                         "name": .string(note.title),
                         "folder": .string(note.folder),
                     ]
+                    object.merge(NotesIdentifiers.fields(note.id, uuids: uuids)) { $1 }
+                    if !note.folderID.isEmpty {
+                        object.merge(NotesIdentifiers.fields(note.folderID, uuids: uuids, prefix: "folder")) { $1 }
+                    }
                     if let modified = NotesDates.iso(note.modified) { object["dateModified"] = .string(modified) }
-                    return .object(object)
+                    return Value.object(object)
                 }
             ),
         ]
@@ -779,18 +842,44 @@ enum NotesOrganizeTools {
         ] as Value
     }
 
-    private static func writeResult(_ fields: [String]) throws -> Value {
+    private static func writeResult(
+        _ fields: [String],
+        known: NotesResolved,
+        mapper: any NotesIDMapping
+    ) async throws -> Value {
         guard fields.count >= 3 else { throw NotesWriteError.scriptFailed("Notes returned an unexpected answer") }
-        return [
-            "identifier": .string(fields[0]), "name": .string(fields[1]),
+        var object: [String: Value] = [
+            "name": .string(fields[1]),
             "dateModified": .string(NotesDates.iso(NotesDates.date(fromLocalISO: fields[2])) ?? fields[2]),
-        ] as Value
+        ]
+        object.merge(await identifiers(fields[0], known: known, mapper: mapper)) { $1 }
+        return Value.object(object)
+    }
+
+    /// The fields that name the note or folder `scriptID`, with its UUID when the database has one.
+    /// A row that the script just made can be missing from the database for a moment, so that's retried
+    /// when the id is not one the caller named.
+    private static func identifiers(
+        _ scriptID: String,
+        known: NotesResolved? = nil,
+        mapper: any NotesIDMapping
+    ) async -> [String: Value] {
+        if let known, known.scriptID == scriptID, let uuid = known.uuid {
+            return NotesIdentifiers.fields(scriptID, uuids: [:], uuid: uuid)
+        }
+        let isNew = known.map { $0.scriptID != scriptID } ?? false
+        let uuids = await mapper.uuids(forResultIDs: [scriptID], awaitingNew: isNew)
+        return NotesIdentifiers.fields(scriptID, uuids: uuids)
     }
 
     // MARK: - Arguments
 
-    private static func requiredID(in arguments: [String: Value]) throws -> String {
-        try NotesOrganizeInput.validatedNoteID(try requiredString("id", in: arguments))
+    private static func requiredNote(
+        in arguments: [String: Value],
+        mapper: any NotesIDMapping
+    ) async throws -> NotesResolved {
+        let reference = try NotesOrganizeInput.validatedNoteReference(try requiredString("id", in: arguments))
+        return try await mapper.resolve(reference, kind: .note)
     }
 
     private static func string(_ name: String, in arguments: [String: Value]) throws -> String? {

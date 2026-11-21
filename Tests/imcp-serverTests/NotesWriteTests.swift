@@ -260,27 +260,20 @@ final class NotesWriteTests: XCTestCase {
         }
     }
 
-    private struct FakeResolver: NotesIdentifierResolving {
-        var noteIdentifier: String?
-        var folderIdentifier: String?
-        func noteID(
-            title: String,
-            folderPath: [String],
-            folderName: String,
-            accountName: String,
-            createdAfter date: Date
-        ) async -> String? { noteIdentifier }
-        func folderID(path: [String], accountName: String) async -> String? { folderIdentifier }
+    private let noteScriptID = "x-coredata://1/ICNote/p7"
+    private let folderScriptID = "x-coredata://1/ICFolder/p8"
+
+    private func mapper(_ pairs: [String: String] = [:]) -> FakeNotesIDMapper {
+        FakeNotesIDMapper(uuidByScriptID: pairs)
     }
 
     private func tools(
         enabled: Bool,
         runner: FakeRunner = FakeRunner(),
-        resolver: FakeResolver = FakeResolver()
+        mapper: any NotesIDMapping = FakeNotesIDMapper()
     ) -> [String: Tool] {
         Dictionary(
-            uniqueKeysWithValues: NotesWriteTools.tools(isEnabled: { enabled }, runner: runner, resolver: resolver).map
-            {
+            uniqueKeysWithValues: NotesWriteTools.tools(isEnabled: { enabled }, runner: runner, mapper: mapper).map {
                 ($0.name, $0)
             }
         )
@@ -315,7 +308,7 @@ final class NotesWriteTests: XCTestCase {
 
     func testCreateRunsTheScriptWithTheCheckedRequest() async throws {
         let runner = FakeRunner()
-        let result = try await tools(enabled: true, runner: runner, resolver: FakeResolver(noteIdentifier: "UUID-1"))[
+        let result = try await tools(enabled: true, runner: runner, mapper: mapper([noteScriptID: "UUID-1"]))[
             "notes_create"
         ]!([
             "title": "Plan", "body": "- [ ] a", "format": "markdown", "folder": "Work/Ideas",
@@ -334,7 +327,7 @@ final class NotesWriteTests: XCTestCase {
 
     func testCreateOmitsTheIdentifierItCannotResolve() async throws {
         let result = try await tools(enabled: true)["notes_create"]!(["title": "Plan"])
-        // The scripting id is never passed off as an id the read tools take.
+        // The scripting id is never passed off as the UUID.
         XCTAssertNil(result.objectValue?["identifier"])
         XCTAssertEqual(result.objectValue?["scriptIdentifier"]?.stringValue, "x-coredata://1/ICNote/p7")
         XCTAssertNotNil(result.objectValue?["description"]?.stringValue)
@@ -350,11 +343,30 @@ final class NotesWriteTests: XCTestCase {
         XCTAssertEqual(result.objectValue?["name"]?.stringValue, "Ideas")
         XCTAssertEqual(result.objectValue?["scriptIdentifier"]?.stringValue, "x-coredata://1/ICFolder/p8")
         XCTAssertNil(result.objectValue?["identifier"])
-        let resolved = try await tools(enabled: true, resolver: FakeResolver(folderIdentifier: "F-1"))[
+        let resolved = try await tools(enabled: true, mapper: mapper([folderScriptID: "F-1"]))[
             "notes_create_folder"
         ]!(
             ["name": "Ideas"])
         XCTAssertEqual(resolved.objectValue?["identifier"]?.stringValue, "F-1")
+        XCTAssertEqual(resolved.objectValue?["scriptIdentifier"]?.stringValue, folderScriptID)
+        XCTAssertNil(resolved.objectValue?["description"])
+    }
+
+    func testCreateWaitsForADatabaseThatLagsBehindNotes() async throws {
+        let lagging = LaggingNotesIDMapper(afterAsks: 2, pairs: [noteScriptID: "UUID-1"])
+        let result = try await tools(enabled: true, mapper: lagging)["notes_create"]!(["title": "Plan"])
+        XCTAssertEqual(result.objectValue?["identifier"]?.stringValue, "UUID-1")
+        XCTAssertEqual(lagging.askCount, 3)
+    }
+
+    func testCreateStillAnswersWhenTheDatabaseCantBeRead() async throws {
+        let broken = FakeNotesIDMapper(failure: .unavailable("no access"))
+        let note = try await tools(enabled: true, mapper: broken)["notes_create"]!(["title": "Plan"])
+        XCTAssertEqual(note.objectValue?["scriptIdentifier"]?.stringValue, noteScriptID)
+        XCTAssertNil(note.objectValue?["identifier"])
+        let folder = try await tools(enabled: true, mapper: broken)["notes_create_folder"]!(["name": "Ideas"])
+        XCTAssertEqual(folder.objectValue?["scriptIdentifier"]?.stringValue, folderScriptID)
+        XCTAssertNil(folder.objectValue?["identifier"])
     }
 
     func testBadArgumentsRunNoScript() async {

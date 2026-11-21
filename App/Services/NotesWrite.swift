@@ -10,17 +10,21 @@ import Foundation
 /// whole HTML body and so drops checklist state, native tags, tables, link previews, and attachments
 /// without an error. They refuse a note that has any of these, or is shared (`NotesRewriteGuard`),
 /// and `notes_append_rich` adds text to such a note through Notes' own editor.
+///
+/// The two routes name a note differently, so every tool takes either id and returns both
+/// (`NotesIDMapper`).
 extension NotesService {
     var tools: [Tool] {
         readTools
             + NotesWriteTools.tools(
                 isEnabled: { NotesWriteTools.isEnabledInSettings },
                 runner: AppleNotesScriptRunner(),
-                resolver: DatabaseIdentifierResolver(service: self)
+                mapper: idMapper
             )
             + NotesOrganizeTools.tools(
                 isEnabled: { NotesWriteTools.isEnabledInSettings },
                 runner: AppleNotesScriptRunner(),
+                mapper: idMapper,
                 traitLookup: { try await NotesService.shared.traits(ofScriptedNote: $0) }
             )
             + NotesPrivateTools.tools
@@ -28,29 +32,4 @@ extension NotesService {
 
     /// The tools that change notes are new, so they start off until the person turns writes on.
     var writesEnabledByDefault: Bool { false }
-}
-
-/// Looks in the Notes database through the Notes service.
-struct DatabaseIdentifierResolver: NotesIdentifierResolving, @unchecked Sendable {
-    let service: NotesService
-
-    func noteID(
-        title: String,
-        folderPath: [String],
-        folderName: String,
-        accountName: String,
-        createdAfter date: Date
-    ) async -> String? {
-        await service.lookUpCreatedNote(
-            title: title,
-            folderPath: folderPath,
-            folderName: folderName,
-            accountName: accountName,
-            createdAfter: date
-        )
-    }
-
-    func folderID(path: [String], accountName: String) async -> String? {
-        await service.lookUpCreatedFolder(path: path, accountName: accountName)
-    }
 }
