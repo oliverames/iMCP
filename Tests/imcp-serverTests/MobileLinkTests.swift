@@ -459,13 +459,26 @@ final class MobileRetryTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    /// Attaching needs a paired device, as it does for a real connection,
+    /// which authenticates before it attaches.
+    @discardableResult
+    private func attach(_ link: some MobilePeerLink, to target: MobileService? = nil) async -> Bool {
+        if pairings.key(for: link.device.id) == nil {
+            try? pairings.save(
+                MobileDevice(id: link.device.id, name: link.device.name, pairedAt: Date()),
+                key: SymmetricKey(size: .bits256)
+            )
+        }
+        return await (target ?? service).attach(link)
+    }
+
     func testCreateReusesItsIdentifierAfterALostConnection() async throws {
         let first = FakeLink { _, _ in throw MobileLinkLost() }
         let second = FakeLink { _, input in #"{"id":"\#(input["id"]?.stringValue ?? "")","title":"Tea"}"# }
-        await service.attach(first)
+        await attach(first)
         let reconnect = Task {
             try await Task.sleep(for: .milliseconds(100))
-            await service.attach(second)
+            await attach(second)
         }
         let value = try await service.call("timers_create", ["title": "Tea", "duration_seconds": 180])
         _ = try await reconnect.value
@@ -481,10 +494,10 @@ final class MobileRetryTests: XCTestCase {
     func testLostWriteIsNotRetriedOnAnotherDevice() async throws {
         let first = FakeLink(device: "iphone") { _, _ in throw MobileLinkLost() }
         let other = FakeLink(device: "ipad") { _, input in #"{"id":"\#(input["id"]?.stringValue ?? "")"}"# }
-        await service.attach(first)
+        await attach(first)
         let reconnect = Task {
             try await Task.sleep(for: .milliseconds(100))
-            await service.attach(other)
+            await attach(other)
         }
         do {
             _ = try await service.call("timers_create", ["title": "Tea", "duration_seconds": 180])
@@ -498,7 +511,7 @@ final class MobileRetryTests: XCTestCase {
 
     func testLostWriteWithoutReconnectReportsTheIdentifier() async throws {
         let link = FakeLink { _, _ in throw MobileLinkLost() }
-        await service.attach(link)
+        await attach(link)
         do {
             _ = try await service.call(
                 "alarms_create",
@@ -513,7 +526,7 @@ final class MobileRetryTests: XCTestCase {
 
     func testLostReadWithoutReconnectFallsBackToTheCache() async throws {
         let link = FakeLink { _, _ in throw MobileLinkLost() }
-        await service.attach(link)
+        await attach(link)
         let value = try await service.call("alarms_list", [:])
         XCTAssertEqual(value.objectValue?["source"], "cache")
         XCTAssertEqual(link.calls.filter { $0.tool == "alarms_list" }.count, 1)
@@ -548,7 +561,7 @@ final class MobileRetryTests: XCTestCase {
                 return "{}"
             }
         }
-        await service.attach(link)
+        await attach(link)
         for _ in 0 ..< 100 where await pulls.values.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -570,7 +583,7 @@ final class MobileRetryTests: XCTestCase {
 
     func testLockedPhoneReadsAnswerFromTheCache() async throws {
         let link = FakeLink { _, _ in throw MobileError(MobileTools.lockedMessage) }
-        await service.attach(link)
+        await attach(link)
         let value = try await service.call("workouts_fetch", [:])
         XCTAssertEqual(value.objectValue?["source"], "cache")
         XCTAssertTrue(value.objectValue?["note"]?.stringValue?.contains("locked") == true)
@@ -582,7 +595,7 @@ final class MobileRetryTests: XCTestCase {
             guard tool == MobileTools.statusTool else { throw MobileLinkLost() }
             return #"{"services":{"health":{"available":false,"note":"\#(reason)"}}}"#
         }
-        await service.attach(link)
+        await attach(link)
         _ = try await service.call(MobileTools.statusTool, [:])
         await service.detach(link)
         let value = try await service.call("workouts_fetch", [:])
@@ -628,8 +641,8 @@ final class MobileRetryTests: XCTestCase {
     func testSecondConnectionFromTheSameDeviceDoesNotReplaceALiveLink() async throws {
         let first = FakeLink(device: "iphone") { _, _ in "{}" }
         let second = FakeLink(device: "iphone") { _, _ in "{}" }
-        let firstAttached = await service.attach(first)
-        let secondAttached = await service.attach(second)
+        let firstAttached = await attach(first)
+        let secondAttached = await attach(second)
         XCTAssertTrue(firstAttached)
         XCTAssertFalse(secondAttached)
         XCTAssertEqual(second.closeCount, 1, "The duplicate is closed.")
@@ -642,8 +655,8 @@ final class MobileRetryTests: XCTestCase {
     func testStaleLinkIsReplacedByANewConnectionFromTheSameDevice() async throws {
         let stale = FakeLink(device: "iphone") { _, _ in throw MobileLinkLost() }
         let fresh = FakeLink(device: "iphone") { _, _ in "{}" }
-        await service.attach(stale)
-        let attached = await service.attach(fresh)
+        await attach(stale)
+        let attached = await attach(fresh)
         XCTAssertTrue(attached)
         let connected = await service.connectedDevice
         XCTAssertEqual(connected?.id, "iphone")
@@ -665,8 +678,8 @@ final class MobileRetryTests: XCTestCase {
             return "{}"
         }
         let fresh = FakeLink(device: "iphone") { _, _ in "{}" }
-        await service.attach(hung)
-        let attached = await service.attach(fresh)
+        await attach(hung, to: service)
+        let attached = await attach(fresh, to: service)
         XCTAssertTrue(attached)
         // The old link is closed on its own task, so wait for it instead of reading the count at once.
         for _ in 0 ..< 100 where hung.closeCount == 0 { try await Task.sleep(for: .milliseconds(10)) }
@@ -677,8 +690,8 @@ final class MobileRetryTests: XCTestCase {
     func testAnotherDeviceReplacesTheLink() async throws {
         let first = FakeLink(device: "iphone") { _, _ in "{}" }
         let other = FakeLink(device: "ipad") { _, _ in "{}" }
-        await service.attach(first)
-        let attached = await service.attach(other)
+        await attach(first)
+        let attached = await attach(other)
         XCTAssertTrue(attached)
         let connected = await service.connectedDevice
         XCTAssertEqual(connected?.id, "ipad")
@@ -746,9 +759,20 @@ final class MobileRetryTests: XCTestCase {
         XCTAssertEqual(replacement.closeCount, 1)
     }
 
+    /// A device unpaired between authentication and attach, with no live link to
+    /// check, must not get a link either.
+    func testAttachRefusesADeviceThatIsNotPaired() async {
+        let link = FakeLink(device: "ghost") { _, _ in "{}" }
+        let attached = await service.attach(link)
+        XCTAssertFalse(attached)
+        XCTAssertEqual(link.closeCount, 1)
+        let connected = await service.connectedDevice
+        XCTAssertNil(connected)
+    }
+
     func testPhoneErrorsAreNotRetried() async throws {
         let link = FakeLink { _, _ in throw MobileError("AlarmKit access is off.") }
-        await service.attach(link)
+        await attach(link)
         do {
             _ = try await service.call("alarms_cancel", ["id": "8F0C2B8E-6E1A-4D53-9C0B-6A5D1A3E2F10"])
             XCTFail("The phone's error must reach the caller.")

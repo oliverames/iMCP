@@ -198,17 +198,19 @@ final class MobileActivityAndTransportTests: XCTestCase {
             )
         )
         // A relaunched Mac has no store in memory; it opens the one on disk.
+        let pairings = MobileMemoryPairings()
         let service = MobileService(
             cache: try MobileCache(
                 url: directory.appendingPathComponent("cache.sqlite"),
                 key: SymmetricKey(size: .bits256)
             ),
-            pairings: MobileMemoryPairings(),
+            pairings: pairings,
             activityStoreOpener: { try MobileActivityStore(url: activityURL) },
             advertise: false,
             pollInterval: .seconds(60)
         )
         let link = RecordingActivityLink()
+        try pairings.save(link.device, key: SymmetricKey(size: .bits256))
         await service.attach(link)
         for _ in 0 ..< 100 where link.sent.isEmpty {
             try await Task.sleep(for: .milliseconds(25))
@@ -573,6 +575,82 @@ final class MobileActivityAndTransportTests: XCTestCase {
             XCTAssertTrue(pairingStore.devices().isEmpty)
         }
     }
+}
+
+final class MobileServerWebSocketWireTests: XCTestCase {
+    /// A masked client frame (RFC 6455), as a phone sends it.
+    private static func clientFrame(_ payload: Data) -> Data {
+        var frame = Data([0x82])
+        if payload.count < 126 {
+            frame.append(0x80 | UInt8(payload.count))
+        } else if payload.count <= 0xFFFF {
+            frame.append(0x80 | 126)
+            frame.append(UInt8(payload.count >> 8))
+            frame.append(UInt8(payload.count & 0xFF))
+        } else {
+            frame.append(0x80 | 127)
+            var length = UInt64(payload.count).bigEndian
+            withUnsafeBytes(of: &length) { frame.append(contentsOf: $0) }
+        }
+        frame.append(contentsOf: [0, 0, 0, 0])  // a zero mask leaves the payload as is
+        frame.append(payload)
+        return frame
+    }
+
+    func testAHelloSizedFrameIsAcceptedBeforeAuthentication() async throws {
+        let payload = Data(repeating: 7, count: 2_000)
+        let wire = MobileServerWebSocketWire(stream: ScriptedStream([Self.clientFrame(payload)]))
+        let received = try await wire.receiveFrame()
+        XCTAssertEqual(received, payload)
+    }
+
+    func testAnOversizedFrameIsRefusedBeforeAuthentication() async throws {
+        let size = MobileServerWebSocketWire.preAuthenticationFrameSize + 1
+        let stream = ScriptedStream([Self.clientFrame(Data(repeating: 7, count: size))])
+        let wire = MobileServerWebSocketWire(stream: stream)
+        do {
+            _ = try await wire.receiveFrame()
+            XCTFail("a frame over the pre-authentication cap must be refused")
+        } catch {
+            XCTAssertTrue("\(error)".contains("size limit"), "\(error)")
+        }
+    }
+
+    func testTheLargeLimitAppliesOnlyAfterAuthentication() async throws {
+        let size = MobileServerWebSocketWire.preAuthenticationFrameSize * 4
+        let payload = Data(repeating: 9, count: size)
+        let wire = MobileServerWebSocketWire(stream: ScriptedStream([Self.clientFrame(payload)]))
+        await wire.peerAuthenticated()
+        let received = try await wire.receiveFrame()
+        XCTAssertEqual(received?.count, size)
+    }
+
+    func testAFragmentedMessageIsCappedBeforeAuthentication() async throws {
+        let part = Data(repeating: 1, count: MobileServerWebSocketWire.preAuthenticationFrameSize - 1)
+        var first = Self.clientFrame(part)
+        first[0] = 0x02  // binary, FIN clear
+        var second = Self.clientFrame(part)
+        second[0] = 0x80  // continuation, FIN set
+        let wire = MobileServerWebSocketWire(stream: ScriptedStream([first + second]))
+        do {
+            _ = try await wire.receiveFrame()
+            XCTFail("a message over the pre-authentication cap must be refused")
+        } catch {}
+    }
+}
+
+/// A byte stream that serves the scripted chunks, then reports the peer closed.
+private actor ScriptedStream: MobileByteStream {
+    private var chunks: [Data]
+    init(_ chunks: [Data]) { self.chunks = chunks }
+
+    func receive(timeout: Duration) async throws -> Data {
+        guard !chunks.isEmpty else { return Data() }
+        return chunks.removeFirst()
+    }
+
+    func send(_ data: Data, timeout: Duration) async throws {}
+    func close() async {}
 }
 
 private actor ActivityRecorder {

@@ -568,6 +568,13 @@ protocol MobileFrameWire: Sendable {
     /// Returns `nil` when the peer closes cleanly.
     func receiveFrame() async throws -> Data?
     func close() async
+    /// Called once the peer has proved its identity. A wire that caps frames
+    /// before that point lifts the cap here.
+    func peerAuthenticated() async
+}
+
+extension MobileFrameWire {
+    func peerAuthenticated() async {}
 }
 
 /// RFC 6455 WebSocket handshake helpers for server-side upgrade handling.
@@ -667,7 +674,13 @@ actor MobileServerWebSocketWire: MobileFrameWire {
     private let stream: any MobileByteStream
     private var buffer: Data
     private var closed = false
-    private static let maximumFrameSize = 64 * 1024 * 1024
+    /// The cap once the peer is authenticated.
+    static let authenticatedFrameSize = 64 * 1024 * 1024
+    /// The cap before the peer's hello is verified. The hello is a few hundred bytes,
+    /// and this route is reachable from the public internet, so an unauthenticated
+    /// peer must not be able to make the Mac buffer megabytes.
+    static let preAuthenticationFrameSize = 8 * 1024
+    private var maximumFrameSize = MobileServerWebSocketWire.preAuthenticationFrameSize
 
     init(stream: any MobileByteStream, initialBuffer: Data = Data()) {
         self.stream = stream
@@ -708,13 +721,13 @@ actor MobileServerWebSocketWire: MobileFrameWire {
                 let ext = try await readExact(8)
                 var value: UInt64 = 0
                 for byte in ext { value = (value << 8) | UInt64(byte) }
-                guard value <= UInt64(Self.maximumFrameSize) else {
+                guard value <= UInt64(maximumFrameSize) else {
                     await close()
                     throw MobileError("WebSocket frame exceeded size limit.")
                 }
                 payloadLength = Int(value)
             }
-            guard payloadLength <= Self.maximumFrameSize else {
+            guard payloadLength <= maximumFrameSize else {
                 await close()
                 throw MobileError("WebSocket frame exceeded size limit.")
             }
@@ -750,7 +763,7 @@ actor MobileServerWebSocketWire: MobileFrameWire {
                     await close()
                     throw MobileError("Unexpected WebSocket continuation frame.")
                 }
-                guard fragmented.count + payload.count <= Self.maximumFrameSize else {
+                guard fragmented.count + payload.count <= maximumFrameSize else {
                     await close()
                     throw MobileError("WebSocket message exceeded size limit.")
                 }
@@ -767,6 +780,10 @@ actor MobileServerWebSocketWire: MobileFrameWire {
         guard !closed else { return }
         closed = true
         await stream.close()
+    }
+
+    func peerAuthenticated() async {
+        maximumFrameSize = Self.authenticatedFrameSize
     }
 
     private func readExact(_ count: Int) async throws -> Data {

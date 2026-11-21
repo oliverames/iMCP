@@ -876,6 +876,7 @@ actor MobileService: MobileBackend {
                 await wire.close()
                 return
             }
+            await wire.peerAuthenticated()
             let channel = MobileEncryptedChannel(
                 wire: wire,
                 sendKey: keys.send,
@@ -997,9 +998,6 @@ actor MobileService: MobileBackend {
     /// Returns whether `link` is now the connection; if not, it has been closed.
     @discardableResult
     func attach(_ link: any MobilePeerLink) async -> Bool {
-        // Remember whether the device was paired before the liveness check, so
-        // an unpair during the wait can be told from a device that never paired.
-        let wasPaired = pairings.key(for: link.device.id) != nil
         if let current = self.link, current !== link, current.device.id == link.device.id,
             await current.answers(within: livenessTimeout), self.link === current
         {
@@ -1008,7 +1006,9 @@ actor MobileService: MobileBackend {
         }
         // The device may have been unpaired while the status call ran.
         // Don't install a link for a device that was just forgotten.
-        if wasPaired, pairings.key(for: link.device.id) == nil {
+        // Authentication and the handshake that precede attach also take time,
+        // so check at the moment of installing, whether or not a link was live.
+        guard pairings.key(for: link.device.id) != nil else {
             await link.close()
             return false
         }
