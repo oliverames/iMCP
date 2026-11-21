@@ -1413,6 +1413,10 @@ final class RemindersService: Service {
                     try store.remove(reminder, commit: true)
                     return .changed
                 } catch {
+                    // The batch shares one store. Drop the pending removal so
+                    // a later item's commit cannot apply a delete reported
+                    // here as failed or uncertain.
+                    store.reset()
                     if EKEventStore().calendarItem(withIdentifier: identifier) == nil {
                         return .uncertain(error.localizedDescription)
                     }
@@ -1751,10 +1755,7 @@ final class RemindersService: Service {
         return .object([
             "type": .string("relative"),
             "minutes": .int(minutes),
-            "label": .string(
-                minutes >= 0
-                    ? "\(minutes) minutes before due date" : "\(-minutes) minutes after due date"
-            ),
+            "label": .string(RemindersQuery.relativeAlarmLabel(minutes: minutes)),
         ])
     }
 
