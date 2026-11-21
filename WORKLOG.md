@@ -6,7 +6,7 @@
 
 **Decisions made**: The #308 review, #364 update and #305 note were posted with Oliver's approval. Mattt took only #382's alert wording; the custom menu panel waits for his #316 wizard. The menu's accessibility changes (real buttons, system background, semantic fonts, standard About panel) can be offered separately; not yet offered.
 
-**Left off at**: Waiting on Mattt. The small menu accessibility PR was offered on #364; the panel gets reworked around #316 once it merges. Fork-only follow-up: `NotesOrganizeTools` still returns scripting ids as `identifier` for move, rename and similar tools.
+**Left off at**: Waiting on Mattt. The small menu accessibility PR was offered on #364; the panel gets reworked around #316 once it merges. Done since: every Notes tool accepts the database id or the `x-coredata://` id and returns both, through `NotesIDMapper` (an exact read-only database lookup, with the NotesShared bridge as fallback); `notes_create`'s title and timestamp matching is gone (`5dc4506`, 862 tests passed). Live checks are in `oliverames/iMCP#13`.
 
 ---
 
