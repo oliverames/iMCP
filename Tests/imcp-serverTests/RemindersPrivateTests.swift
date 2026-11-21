@@ -55,6 +55,96 @@ final class RemindersPrivateTests: XCTestCase {
         }
     }
 
+    // MARK: - Per-tool switches
+
+    /// Every private write with the switch that must stop it.
+    private var gatedCalls: [(tool: String, args: [String: Any], gate: String)] {
+        [
+            ("reminders_flag", ["id": id1, "flagged": true], "reminders_update"),
+            ("reminders_tags", ["action": "add", "id": id1, "tags": ["work"]], "reminders_update"),
+            ("reminders_add_link", ["id": id1, "url": "https://example.com"], "reminders_update"),
+            ("reminders_subtasks", ["action": "move", "id": id1, "top_level": true], "reminders_update"),
+            ("reminders_sections", ["action": "assign", "id": id1, "section": "Plan"], "reminders_update"),
+            ("reminders_subtasks", ["action": "create", "parent_id": id1, "title": "Sub"], "reminders_create"),
+            ("reminders_restore", ["id": id1, "list": "Inbox"], "reminders_create"),
+            ("reminders_groups", ["action": "rename", "group": "G", "name": "H"], "reminders_lists_rename"),
+            ("reminders_list_appearance", ["list": "Inbox", "emoji": "🎯"], "reminders_lists_update"),
+            ("reminders_groups", ["action": "create", "name": "G"], "reminders_lists_create"),
+            ("reminders_groups", ["action": "delete", "group": "G"], "reminders_lists_delete"),
+            ("reminders_templates", ["action": "apply", "template": "T"], "reminders_lists_create"),
+            ("reminders_templates", ["action": "create", "name": "T", "list": "Inbox"], "reminders_lists_create"),
+            ("reminders_templates", ["action": "delete", "template": "T"], "reminders_lists_delete"),
+            ("reminders_smart_lists", ["action": "create", "name": "S", "tags": ["a"]], "reminders_lists_create"),
+            ("reminders_smart_lists", ["action": "delete", "smart_list": "S"], "reminders_lists_delete"),
+        ]
+    }
+
+    private func defaults(disabling gates: Set<String>) throws -> UserDefaults {
+        let suite = "RemindersPrivateTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.set(true, forKey: RemindersPrivate.settingKey)
+        if !gates.isEmpty {
+            defaults.set(try JSONEncoder().encode(gates), forKey: "disabledTools")
+        }
+        return defaults
+    }
+
+    func testPrivateWritesStopWhenTheirSwitchIsDisabled() async throws {
+        for call in gatedCalls {
+            let defaults = try defaults(disabling: [call.gate])
+            var reachedBridge = false
+            do {
+                _ = try await RemindersPrivate.run(tool: call.tool, arguments: call.args, defaults: defaults) { _ in
+                    reachedBridge = true
+                    return ["verified": true]
+                }
+                XCTFail("\(call.tool) \(call.args) should be refused while \(call.gate) is disabled")
+            } catch {
+                XCTAssertEqual((error as? RemindersInputError)?.code, "tool_disabled", "\(call.tool)")
+                XCTAssertEqual((error as? RemindersInputError)?.message.contains(call.gate), true, "\(error)")
+            }
+            XCTAssertFalse(reachedBridge, "\(call.tool) reached ReminderKit with \(call.gate) disabled")
+        }
+    }
+
+    func testPrivateWritesRunWhenTheirSwitchIsOn() async throws {
+        for call in gatedCalls {
+            // Disabling an unrelated switch must not block the call.
+            let defaults = try defaults(disabling: ["reminders_fetch"])
+            var reachedBridge = false
+            _ = try await RemindersPrivate.run(tool: call.tool, arguments: call.args, defaults: defaults) { _ in
+                reachedBridge = true
+                return ["verified": true]
+            }
+            XCTAssertTrue(reachedBridge, "\(call.tool) \(call.args)")
+        }
+    }
+
+    func testPrivateReadsIgnoreWriteSwitches() async throws {
+        let all: Set<String> = [
+            "reminders_update", "reminders_create", "reminders_lists_create", "reminders_lists_update",
+            "reminders_lists_rename", "reminders_lists_delete",
+        ]
+        let defaults = try defaults(disabling: all)
+        let reads: [(String, [String: Any])] = [
+            ("reminders_tags", ["action": "list", "list": "Inbox"]),
+            ("reminders_get_private", ["id": id1]),
+            ("reminders_groups", ["action": "list"]),
+            ("reminders_templates", ["action": "list"]),
+            ("reminders_smart_lists", ["action": "list"]),
+            ("reminders_subtasks", ["action": "list", "parent_id": id1]),
+            ("reminders_sections", ["action": "list", "list": "Inbox"]),
+        ]
+        for (tool, args) in reads {
+            var reachedBridge = false
+            _ = try await RemindersPrivate.run(tool: tool, arguments: args, defaults: defaults) { _ in
+                reachedBridge = true
+                return [:]
+            }
+            XCTAssertTrue(reachedBridge, tool)
+        }
+    }
+
     // MARK: - Tags
 
     func testTagCleaning() throws {

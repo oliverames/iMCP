@@ -9,8 +9,8 @@ import Foundation
 enum RemindersPrivate {
     /// The setting that turns the private tools on. Off until the person chooses.
     ///
-    /// This base has no per-service "Allow writes" mechanism (that is `feat/service-write-toggle`,
-    /// PR #342), so the private tools carry their own switch. It covers their reads too,
+    /// The private tools carry their own switch, in addition to the per-service "Allow writes"
+    /// and the per-tool switches (see `governingSwitch`). It covers their reads too,
     /// because every one of them goes through the unsupported ReminderKit API.
     static let settingKey = "remindersPrivateEnabled"
 
@@ -533,15 +533,69 @@ enum RemindersPrivate {
         return try parse(response: reply)
     }
 
-    /// Validates a tool call, runs it, and shapes the result. The setting is checked first.
+    /// The per-tool Settings switch that governs a private tool call, or nil for a read.
+    ///
+    /// A private write that changes the same thing as a public tool is gated by that
+    /// tool's switch, as `reminders_complete` is by `reminders_update`. Turning off
+    /// `reminders_update` therefore also turns off flagging, tagging, linking, nesting, and
+    /// assigning a reminder to a section.
+    static func governingSwitch(tool: String, arguments args: [String: Any]) -> String? {
+        let action = (args["action"] as? String)?.lowercased()
+        switch tool {
+        case "reminders_flag", "reminders_add_link":
+            return "reminders_update"
+        case "reminders_tags":
+            return action == "list" ? nil : "reminders_update"
+        case "reminders_subtasks":
+            switch action {
+            case "create": return "reminders_create"
+            case "move": return "reminders_update"
+            default: return nil
+            }
+        case "reminders_sections":
+            // Assigning moves a reminder; the other actions reshape a list.
+            switch action {
+            case "assign": return "reminders_update"
+            case "create", "rename", "delete": return "reminders_lists_update"
+            default: return nil
+            }
+        case "reminders_restore": return "reminders_create"
+        case "reminders_list_appearance": return "reminders_lists_update"
+        case "reminders_groups":
+            switch action {
+            case "create": return "reminders_lists_create"
+            case "rename": return "reminders_lists_rename"
+            case "delete": return "reminders_lists_delete"
+            case "add_list", "remove_list": return "reminders_lists_update"
+            default: return nil
+            }
+        case "reminders_smart_lists", "reminders_templates":
+            switch action {
+            case "create", "apply": return "reminders_lists_create"
+            case "delete": return "reminders_lists_delete"
+            default: return nil
+            }
+        default: return nil
+        }
+    }
+
+    /// Validates a tool call, runs it, and shapes the result. The setting is checked first,
+    /// then the arguments, then the per-tool switch, all before any ReminderKit call.
+    /// `performer` is the bridge call; tests replace it.
     static func run(
         tool: String,
         arguments: [String: Any],
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        performer: (Request) async throws -> [String: Any] = { try await RemindersPrivate.perform($0) }
     ) async throws -> [String: Any] {
         guard isEnabled(defaults: defaults) else { throw fail("private_disabled", disabledMessage) }
         let request = try request(tool: tool, arguments: arguments)
-        let result = try await perform(request)
+        if let gate = governingSwitch(tool: tool, arguments: arguments),
+            RemindersQuery.isToolDisabled(gate, defaults: defaults)
+        {
+            throw fail("tool_disabled", "\(tool) is unavailable while \(gate) is disabled.")
+        }
+        let result = try await performer(request)
         return shape(result, isWrite: isWrite(tool: tool, arguments: arguments))
     }
 }
