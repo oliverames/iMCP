@@ -1,5 +1,13 @@
 # Worklog
 
+## 2026-11-23 - #390 and #378 merged; #384 rebased with a one-pass Markdown scan
+
+**What changed**: Mattt merged #390 and #378 on 2026-11-22. #384 is rebased on upstream main with main's `Foundation+Extensions.swift` as is. `a606d91` matches brackets, parentheses and emphasis runs in one pass, because `[`s with as many `]`, repeated `[a](` and repeated `***a` were all quadratic. Old and new output matched on 600,000 random lines; 308 tests, 1 skipped, 0 failures. The reply is posted and the PR body updated with Oliver's approval. Ported to fork main (`b8d686b`, 865 tests passed).
+
+**Left off at**: Waiting on Mattt for #373, #377, #384, #385, #391 and #392. #384 still contains #377's three commits. TopoText 0.4.0 (2026-11-21) adds an edit engine, which works on bytes and writes nothing to the database; fork main has not moved off its 0.3.0 pin. Fork main has not merged upstream's #378, #390 and #393.
+
+---
+
 ## 2026-11-21 - Mattt's morning reviews of #378 and #384, #390 rebased
 
 **What changed**: Mattt merged #393 and asked for changes on #378 and #384. #390 is rebased on main, with the empty CI re-run commit dropped; macOS 26 CI is green (`14070a2`). #378 reads new dates in a Gregorian `.current` calendar instead of the reminder's stored zone, and date-only `due` and `start` leave `timeZone` nil so they float (`82ac301`). #384 caps link and emphasis nesting at 8 levels, stops scanning a line for links once no `]` follows, and the search fake no longer returns unreadable notes as matches (`30ee512`). The new tests fail with the fixes reverted (a crash, then 257 s). Replies naming each commit are posted. The Notes fix is ported to fork main.
