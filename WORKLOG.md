@@ -4,7 +4,7 @@
 
 **What changed**: Merged upstream through `82a5284` (#393, #390, #378). `Reminders.swift` and `RemindersQuery.swift` take upstream's version (local Gregorian calendar for new dates, floating date-only values) plus the fork's ReminderKit tools. `RemindersQueryTests` keeps `TestDefaults`. Upstream compiles `Reminders.swift` into `imcp-serverTests`, so `RemindersPrivateTools.swift` is in that target too. 872 tests passed, the iMCP app builds, and the changed Swift files pass `swift format lint --strict`.
 
-Merged upstream main into the parked #387 (`4ef746d`), #389 (`a76dc56`) and, through #387, #388 (`39b27c5`); only `project.pbxproj` conflicted. Tests: 570, 373 and 575 passed, 1 skipped each; lint clean. Their app builds could not be checked locally (no provisioning profile for `co.dododo.iMCP.Helper`), so CI decides. PR bodies still carry the older test counts.
+Merged upstream main into the parked #387 (`4ef746d`), #389 (`a76dc56`) and, through #387, #388 (`39b27c5`); only `project.pbxproj` conflicted. Tests: 570, 373 and 575 passed, 1 skipped each; lint clean. Their app builds could not be checked locally (no provisioning profile for `co.dododo.iMCP.Helper`), so CI decides. The PR bodies carry the new test counts (571, 576 and 374 run).
 
 **Decisions made**: No new Notes PRs recommended for now: on #364 (2026-11-20) Mattt declined private frameworks, asked for nothing beyond his list, and has not decided how TopoText edits reach the database.
 
