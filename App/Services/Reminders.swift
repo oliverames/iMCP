@@ -1750,7 +1750,7 @@ final class RemindersService: Service {
             ])
         }
         // A stored alarm can carry any offset. Convert without trapping: an
-        // offset too large for an Int is reported at the nearest bound.
+        // offset beyond the alarm limit is reported at the nearest bound.
         let minutes = RemindersQuery.relativeAlarmMinutes(alarm.relativeOffset)
         return .object([
             "type": .string("relative"),
@@ -1883,8 +1883,15 @@ final class RemindersService: Service {
 
         let newNotes = try Self.stringChange(arguments["notes"], description: "notes")
         let newURL = try Self.urlChange(arguments["url"])
-        let newStart = try Self.dateComponentsChange(arguments["start"], description: "start")
-        let newDue = try Self.dueChange(arguments["due"])
+        // Dates are read in local time, as the schema says. Date-only values
+        // stay floating, and a timed due keeps its seconds.
+        let calendar = Self.localCalendar
+        let newStart = try Self.dateComponentsChange(
+            arguments["start"],
+            description: "start",
+            calendar: calendar
+        )
+        let newDue = try Self.dueChange(arguments["due"], calendar: calendar)
         let newPriority = try Self.priorityChange(arguments["priority"])
         let newCompleted = try Self.boolChange(arguments["completed"], description: "completed")
         let newRecurrence: PropertyChange<EKRecurrenceRule>
@@ -2063,11 +2070,24 @@ final class RemindersService: Service {
         alarm.absoluteDate == nil && alarm.structuredLocation == nil
     }
 
-    private static func dueChange(_ value: Value?) throws -> PropertyChange<DateComponents> {
+    /// The calendar new dates are read in: Gregorian in the Mac's time
+    /// zone, as the schema says. Reading them in a reminder's stored zone
+    /// would move "09:00" to wherever the reminder was saved.
+    private static var localCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar
+    }
+
+    private static func dueChange(
+        _ value: Value?,
+        calendar: Calendar
+    ) throws -> PropertyChange<DateComponents> {
         switch value {
         case nil: return .absent
         case .null: return .clear
-        case .string(let text): return .set(try RemindersQuery.parseDue(text).components)
+        case .string(let text):
+            return .set(try RemindersQuery.parseDue(text, calendar: calendar).components)
         default:
             throw RemindersInputError(
                 code: "invalid_due_date",
@@ -2176,13 +2196,18 @@ final class RemindersService: Service {
 
     private static func dateComponentsChange(
         _ value: Value?,
-        description: String
+        description: String,
+        calendar: Calendar
     ) throws -> PropertyChange<DateComponents> {
         switch value {
         case nil: return .absent
         case .string(let dateString):
             return .set(
-                try Self.dateComponents(fromDateString: dateString, description: description)
+                try Self.dateComponents(
+                    fromDateString: dateString,
+                    description: description,
+                    calendar: calendar
+                )
             )
         case .null: return .clear
         default:
@@ -2629,10 +2654,11 @@ final class RemindersService: Service {
     }
 
     /// Parses an ISO 8601 date string into due/start date components,
-    /// normalizing date-only values to local midnight.
+    /// normalizing date-only values to midnight in `calendar`.
     private static func dateComponents(
         fromDateString dateString: String,
-        description: String
+        description: String,
+        calendar: Calendar
     ) throws -> DateComponents {
         guard
             let parsedDate = ISO8601DateFormatter.parsedLenientISO8601Date(
@@ -2649,15 +2675,18 @@ final class RemindersService: Service {
             )
         }
 
-        let calendar = Calendar.current
         let date = calendar.normalizedStartDate(
             from: parsedDate.date,
             isDateOnly: parsedDate.isDateOnly
         )
-        return calendar.dateComponents(
+        var components = calendar.dateComponents(
             [.year, .month, .day, .hour, .minute, .second],
             from: date
         )
+        components.calendar = calendar
+        // A nil time zone keeps a date-only value floating, per EKReminder.h.
+        components.timeZone = parsedDate.isDateOnly ? nil : calendar.timeZone
+        return components
     }
 
     /// An alarm configuration that has passed validation.

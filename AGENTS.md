@@ -77,8 +77,9 @@ to `mattt/iMCP`:
   and the fork's `Scripts/` helpers (`generate-bootstrap-secrets.sh`,
   `install-ios.sh`, `check-home.py`).
 
-Work that is in flight upstream is not on this list: #373, #377, #378, #384,
-#385, #390, #391, #392 and #393 (#387, #388 and #389 are parked; see below).
+Work that is in flight upstream is not on this list: #373, #377, #384, #385,
+#391 and #392 (#387, #388 and #389 are parked; see below). #378, #390 and #393
+merged and are in fork main.
 
 ## Long-term plan for each fork-only feature (Oliver, 2026-11-20)
 

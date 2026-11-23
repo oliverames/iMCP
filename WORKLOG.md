@@ -1,5 +1,13 @@
 # Worklog
 
+## 2026-11-23 - Upstream main merged into fork main
+
+**What changed**: Merged upstream through `82a5284` (#393, #390, #378). `Reminders.swift` and `RemindersQuery.swift` take upstream's version (local Gregorian calendar for new dates, floating date-only values) plus the fork's ReminderKit tools. `RemindersQueryTests` keeps `TestDefaults`. Upstream compiles `Reminders.swift` into `imcp-serverTests`, so `RemindersPrivateTools.swift` is in that target too. 872 tests passed, the iMCP app builds, and the changed Swift files pass `swift format lint --strict`.
+
+**Left off at**: TopoText is still pinned to 0.3.0.
+
+---
+
 ## 2026-11-23 - #390 and #378 merged; #384 rebased with a one-pass Markdown scan
 
 **What changed**: Mattt merged #390 and #378 on 2026-11-22. #384 is rebased on upstream main with main's `Foundation+Extensions.swift` as is. `a606d91` matches brackets, parentheses and emphasis runs in one pass, because `[`s with as many `]`, repeated `[a](` and repeated `***a` were all quadratic. Old and new output matched on 600,000 random lines; 308 tests, 1 skipped, 0 failures. The reply is posted and the PR body updated with Oliver's approval. Ported to fork main (`b8d686b`, 865 tests passed).
