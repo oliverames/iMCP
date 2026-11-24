@@ -69,7 +69,7 @@ to `mattt/iMCP`:
   Mattt is doing trust by code signature himself.
 - **Approvals**: the **Unattended** switch (`Unattended`) is the one approval
   pattern that is fork-only. Allow writes and the shared confirmation window
-  are Mattt's design and go upstream in #377.
+  are Mattt's design and are upstream (#377).
 - **Setup/onboarding**: `OnboardingFlow` and `RemoteAccessChecklist` stay here only
   until Mattt merges his own Setup Assistant (he is building on #387); then the
   fork takes his.
@@ -77,9 +77,9 @@ to `mattt/iMCP`:
   and the fork's `Scripts/` helpers (`generate-bootstrap-secrets.sh`,
   `install-ios.sh`, `check-home.py`).
 
-Work that is in flight upstream is not on this list: #373, #377, #384, #385,
-#391 and #392 (#387, #388 and #389 are parked; see below). #378, #390 and #393
-merged and are in fork main.
+Work that is in flight upstream is not on this list: #373, #384, #385, #391
+and #392 (#387, #388 and #389 are parked; see below). #377, #378, #390 and
+#393 merged and are in fork main.
 
 ## Long-term plan for each fork-only feature (Oliver, 2026-11-20)
 

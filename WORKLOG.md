@@ -4,9 +4,9 @@
 
 **What changed**: `SmartFolderQuery` and `smartFolderValue` come from upstream's `NotesInline.swift` with `NotesInlineTests.swift`; the fork's `NotesSmartFolders.swift` and its tests are gone. #391's outbox quarantine (`ee78f0d`) and its two tests are ported. The `messages_send` description and a comment say Unattended skips the confirmation. 887 tests passed, the iMCP app builds, changed files lint clean.
 
-**Upstream**: Mattt merged #377 (2026-11-24 13:50 UTC) and will merge #384 once it is rebased without #377's commits and CI passes. The rebase is pushed and answered with Oliver's approval (`f588ff5`, tree identical to `a606d91`). #373, #385, #387 and #388 now conflict with upstream main; #389 does not. Fork main has not merged #377 and conflicts in six files.
+**Upstream**: Mattt merged #377 (2026-11-24 13:50 UTC) and will merge #384 once it is rebased without #377's commits and CI passes. The rebase is pushed and answered with Oliver's approval (`f588ff5`, tree identical to `a606d91`). #373, #385, #387 and #388 now conflict with upstream main; #389 does not. Fork main has #377 merged; its side won all six conflicts because it already had everything, and the tree did not change. #384 CI passes.
 
-**Left off at**: Waiting on Mattt to merge #384. Before the parked PRs are offered again, rebuild them from fork main: they predate the fork's later fixes.
+**Left off at**: Waiting on Mattt to merge #384; then merge it here and update #373 and #385 once. Before the parked PRs are offered again, rebuild them from fork main: they predate the fork's later fixes.
 
 ---
 
