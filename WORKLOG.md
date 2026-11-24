@@ -8,6 +8,8 @@
 
 **Left off at**: Waiting on Mattt to merge #384; then merge it here and update #373 and #385 once. Before the parked PRs are offered again, rebuild them from fork main: they predate the fork's later fixes.
 
+**Open questions**: Remaining steps and acceptance checks are in oliverames/iMCP#12. No watch on #384 is running after this session. The outbox quarantine has not been tested on a phone.
+
 ---
 
 ## 2026-11-23 - Upstream main merged into fork main
