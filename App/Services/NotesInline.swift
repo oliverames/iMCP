@@ -88,3 +88,93 @@ enum LinkDirection: Sendable {
     case outgoing
     case incoming
 }
+
+/// A smart folder as an object for tool output, with its rules read from the stored query.
+/// - Parameter folderNames: The names of the folders, by identifier, for the name of the parent folder.
+func smartFolderValue(_ folder: TopoText.SmartFolder, folderNames: [TopoText.Folder.ID: String]) -> Value {
+    var object: [String: Value] = [
+        "@id": .string(folder.id.description),
+        "@type": "SmartFolder",
+        "name": .string(folder.name),
+    ]
+    if let accountName = folder.account?.name {
+        object["account"] = .string(accountName)
+    }
+    if let parentID = folder.parentID {
+        var parent: [String: Value] = ["@id": .string(parentID.description)]
+        if let name = folderNames[parentID] {
+            parent["name"] = .string(name)
+        }
+        object["parentFolder"] = .object(parent)
+    }
+    let query = SmartFolderQuery(folder.query)
+    if let rules = query.rules {
+        object["rules"] = rules
+    }
+    if query.includesRecentlyDeleted == true {
+        object["includesRecentlyDeleted"] = true
+    }
+    // The stored text stays available, because rules that this server doesn't know are not explained.
+    object["query"] = .string(folder.query)
+    return .object(object)
+}
+
+/// The query that Notes stores for a smart folder.
+///
+/// On macOS 27.0.1, Notes stores this query for a smart folder with one tag rule:
+///
+/// ```json
+/// {"type":{"and":[{"deleted":false},{"and":[{"and":[{"deleted":false},{"and":[{"tag":"SMART"}]}]}]}]},"entity":"note"}
+/// ```
+///
+/// Notes stores the tag in capitals, without its `#`.
+/// The rules are the value of `type`, with its conjunctions simplified:
+/// an `and` with one clause becomes that clause,
+/// and a clause that is exactly `{"deleted": <Bool>}` in an `and`, at any depth of nested `and` clauses,
+/// is the filter for Recently Deleted, so it moves to ``includesRecentlyDeleted``.
+/// For the query above, the rules are `{"tag":"SMART"}`.
+/// Notes doesn't document the format, and other kinds of rules have not been observed,
+/// so everything else, such as `or` clauses and unknown keys, is passed through as stored.
+/// If two `deleted` clauses disagree, no note matches the query,
+/// so the rules are the value of `type` as stored, and ``includesRecentlyDeleted`` is `nil`.
+/// JSON without `type` is kept whole as the rules.
+struct SmartFolderQuery: Sendable, Equatable {
+    /// The rules of the folder as JSON, or `nil` if the text is not JSON.
+    private(set) var rules: Value?
+    /// Whether the folder includes Recently Deleted, if the query says so without contradiction.
+    private(set) var includesRecentlyDeleted: Bool?
+
+    init(_ text: String) {
+        guard let value = try? JSONDecoder().decode(Value.self, from: Data(text.utf8)) else { return }
+        guard let type = value.objectValue?["type"] else {
+            rules = value
+            return
+        }
+        var deleted: Set<Bool> = []
+        let simplified = Self.simplified(type, deleted: &deleted)
+        // Removing clauses that contradict each other would make a query that matches nothing match notes.
+        guard deleted.count <= 1 else {
+            rules = type
+            return
+        }
+        rules = simplified
+        includesRecentlyDeleted = deleted.first
+    }
+
+    /// Simplifies a conjunction and the `and` clauses inside it,
+    /// and collects the values of the `deleted` clauses that it removes.
+    private static func simplified(_ value: Value, deleted: inout Set<Bool>) -> Value {
+        guard let object = value.objectValue, object.count == 1, let clauses = object["and"]?.arrayValue else {
+            return value
+        }
+        var rest: [Value] = []
+        for clause in clauses {
+            if let object = clause.objectValue, object.count == 1, let flag = object["deleted"]?.boolValue {
+                deleted.insert(flag)
+            } else {
+                rest.append(simplified(clause, deleted: &deleted))
+            }
+        }
+        return rest.count == 1 ? rest[0] : .object(["and": .array(rest)])
+    }
+}

@@ -1,5 +1,15 @@
 # Worklog
 
+## 2026-11-24 - Fork fixes from the upstream comparison; #377 merged
+
+**What changed**: `SmartFolderQuery` and `smartFolderValue` come from upstream's `NotesInline.swift` with `NotesInlineTests.swift`; the fork's `NotesSmartFolders.swift` and its tests are gone. #391's outbox quarantine (`ee78f0d`) and its two tests are ported. The `messages_send` description and a comment say Unattended skips the confirmation. 887 tests passed, the iMCP app builds, changed files lint clean.
+
+**Upstream**: Mattt merged #377 (2026-11-24 13:50 UTC) and will merge #384 once it is rebased without #377's commits and CI passes. The rebase is ready locally (`f588ff5`, tree identical to `a606d91`), not pushed. #373, #385, #387 and #388 now conflict with upstream main; #389 does not. Fork main has not merged #377 and conflicts in six files.
+
+**Left off at**: Waiting on Oliver to approve the #384 force-push. Before the parked PRs are offered again, rebuild them from fork main: they predate the fork's later fixes.
+
+---
+
 ## 2026-11-23 - Upstream main merged into fork main
 
 **What changed**: Merged upstream through `82a5284` (#393, #390, #378). `Reminders.swift` and `RemindersQuery.swift` take upstream's version (local Gregorian calendar for new dates, floating date-only values) plus the fork's ReminderKit tools. `RemindersQueryTests` keeps `TestDefaults`. Upstream compiles `Reminders.swift` into `imcp-serverTests`, so `RemindersPrivateTools.swift` is in that target too. 872 tests passed, the iMCP app builds, and the changed Swift files pass `swift format lint --strict`.

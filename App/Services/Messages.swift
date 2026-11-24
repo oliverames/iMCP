@@ -34,7 +34,7 @@ final class MessageService: NSObject, Service, NSOpenSavePanelDelegate {
     }
 
     /// Sending reaches another person, so it stays off until the person turns on "Allow writes",
-    /// and each send is confirmed in a window whether or not it is on.
+    /// and each send is confirmed in a window whether or not it is on, unless Unattended is on.
     var writesEnabledByDefault: Bool { false }
 
     /// Whether the once-per-launch warning about a grant on `chat.db` alone has been logged.
@@ -448,7 +448,7 @@ final class MessageService: NSObject, Service, NSOpenSavePanelDelegate {
                 Send a text message with the Messages app. \
                 Give exactly one destination: recipient (phone number or email) with an optional service, \
                 or chatId (the conversation @id in messages_fetch's isPartOf) without service. \
-                The user must confirm the recipient, service, and full text in iMCP. \
+                Unless the user has turned on Unattended, they must confirm the recipient, service, and full text in iMCP. \
                 Canceling or leaving the confirmation unanswered for \(Int(OutboundConfirmation.timeout.components.seconds)) seconds sends nothing. \
                 Success means Messages accepted the message, not that it was delivered. \
                 When iMCP finds the sent message in the Messages database, \
