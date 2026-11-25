@@ -1,5 +1,19 @@
 # Worklog
 
+## 2026-11-25 - Cloud sessions load iMCP's tools again (#14); #384 merged
+
+**What changed**: `alarms_create` had a bare `anyOf` as its input schema. MCP requires `"type": "object"` at the root, so the MCP TypeScript SDK rejected the whole `tools/list` result. It's an object schema now, and `MobileTools.checkAlarmSchedule` enforces the two forms on the Mac and the phone (`c133d9d`). Idle remote sessions are also swept when a session starts, because the node's loop doesn't run when Cloudflare Tunnel is the only route (`6685129`). Upstream's #384 is merged (`8ab0067`); the Notes create tools follow upstream's write gate, test and layout (`ef731b1`), and `NotesIDMapper` stays. The merge dropped `Package.resolved` by mistake; `05c63c9` restores it.
+
+**Verified**: 888 tests passed. A Release build from `ef731b1` is installed (the old app is in `imcp/iMCP-backups`). A cloud session failed before the fix and, after it, had the tool list and called `mobile_status`.
+
+**Not verified**: The idle sweep has no test and wasn't watched live. No alarm was created on a phone with the new schema.
+
+**Decisions made**: Follow upstream except for the kept tweaks in `AGENTS.md` (Oliver).
+
+**Left off at**: `pr/calendar-selection` (#373) and `pr/files-service` (#385) are rebased on `8967760` locally, and `pr/alarm-object-schema` carries the alarm fix on `mattt/ios-app`. None is tested or pushed. mattt/iMCP#395 (date-only reminders as all-day) is open; take it when it merges.
+
+---
+
 ## 2026-11-24 - Fork fixes from the upstream comparison; #377 merged
 
 **What changed**: `SmartFolderQuery` and `smartFolderValue` come from upstream's `NotesInline.swift` with `NotesInlineTests.swift`; the fork's `NotesSmartFolders.swift` and its tests are gone. #391's outbox quarantine (`ee78f0d`) and its two tests are ported. The `messages_send` description and a comment say Unattended skips the confirmation. 887 tests passed, the iMCP app builds, changed files lint clean.

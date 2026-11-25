@@ -22,6 +22,11 @@ send the public commits alone.
 
 ## Other invariants
 
+- Follow upstream except for the tweaks listed under "What stays on the fork".
+  When merging, take upstream's side unless the difference is on that list.
+- Notes ids: `NotesIDMapper`'s exact lookup stays; upstream matches by title.
+- Every tool's input schema needs `"type": "object"` at its root. One without it
+  makes strict clients drop the whole tool list (#14).
 - Push only to `origin`. Never push to `upstream`; upstream work goes through PRs
   from `oliverames` branches to `mattt/iMCP`.
 - Coordination: `mattt/iMCP#364` (upstream review order and findings) and
