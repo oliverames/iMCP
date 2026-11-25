@@ -10,7 +10,9 @@
 
 **Decisions made**: Follow upstream except for the kept tweaks in `AGENTS.md` (Oliver).
 
-**Left off at**: `pr/calendar-selection` (#373) and `pr/files-service` (#385) are rebased on `8967760` locally, and `pr/alarm-object-schema` carries the alarm fix on `mattt/ios-app`. None is tested or pushed. mattt/iMCP#395 (date-only reminders as all-day) is open; take it when it merges.
+**Upstream (approved by Oliver)**: #373 (`7affa97`) and #385 (`d734590`, without #377's commits) are rebased on `8967760`, pushed and answered; 324 and 359 tests ran, 1 skipped each. The alarm fix is mattt/iMCP#398 against `mattt/ios-app` (241 tests, 1 skipped).
+
+**Left off at**: Waiting on Mattt for #373, #385, #391, #392 and #398. mattt/iMCP#395 (date-only reminders as all-day) is open; take it when it merges.
 
 ---
 
