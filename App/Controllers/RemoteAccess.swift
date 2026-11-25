@@ -1317,6 +1317,8 @@ actor RemoteAccessServer {
         // Reserve a slot first, so that concurrent starts can't exceed the limit.
         pendingSessions += 1
         defer { pendingSessions -= 1 }
+        // The node's loop also does this, but it doesn't run when Cloudflare Tunnel is the only route.
+        await closeIdleSessions()
         if sessions.count + pendingSessions > Self.maximumSessions {
             // Make room by ending the session that has waited longest without a request or stream.
             if let oldest = sessions.values.filter({ $0.openStreams == 0 })
