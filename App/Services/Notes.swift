@@ -39,7 +39,7 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         }
     }
 
-    /// The tools that read notes. `tools` adds the ones that create notes (see `NotesWrite.swift`).
+    /// The tools that read notes. `tools` adds the ones that change the Notes app (see `NotesWrite.swift`).
     @ToolBuilder var readTools: [Tool] {
         Tool(
             name: "notes_folders",
@@ -407,25 +407,6 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
         }
     }
 
-    private func smartFoldersResult() async throws -> Value {
-        try checkDatabaseAccess()
-        let (smartFolders, folders): ([TopoText.SmartFolder], [TopoText.Folder]) = try await withStore { store in
-            try await store.withSnapshot { snapshot in
-                let smartFolders = try snapshot.smartFolders()
-                let folders = try snapshot.folders()
-                return (smartFolders, folders)
-            }
-        }
-        let names = Dictionary(folders.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
-        return .object([
-            "@context": "https://schema.org",
-            "@type": "ItemList",
-            "name": "Smart Folders",
-            "numberOfItems": .int(smartFolders.count),
-            "itemListElement": .array(smartFolders.map { smartFolderValue($0, folderNames: names) }),
-        ])
-    }
-
     // MARK: - Tags, Links, and Smart Folders
 
     /// A note with its contents, tags, and links, read from one snapshot.
@@ -478,6 +459,41 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
                 )
             }
         }
+    }
+
+    private func smartFoldersResult() async throws -> Value {
+        try checkDatabaseAccess()
+        let (smartFolders, folders): ([TopoText.SmartFolder], [TopoText.Folder]) = try await withStore { store in
+            try await store.withSnapshot { snapshot in
+                let smartFolders = try snapshot.smartFolders()
+                let folders = try snapshot.folders()
+                return (smartFolders, folders)
+            }
+        }
+        let names = Dictionary(folders.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+        return .object([
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            "name": "Smart Folders",
+            "numberOfItems": .int(smartFolders.count),
+            "itemListElement": .array(smartFolders.map { smartFolderValue($0, folderNames: names) }),
+        ])
+    }
+
+    private func tagsResult(_ arguments: [String: Value]) async throws -> Value {
+        let includesDeleted = try argument("includeRecentlyDeleted", in: arguments, as: \.boolValue) ?? false
+        try checkDatabaseAccess()
+        let summaries = try await withStore { try await $0.tags(includingRecentlyDeleted: includesDeleted) }
+        let items: [Value] = summaries.map {
+            .object(["name": .string($0.tag.text), "numberOfItems": .int($0.noteCount)])
+        }
+        return .object([
+            "@context": "https://schema.org",
+            "@type": "ItemList",
+            "name": "Note Tags",
+            "numberOfItems": .int(summaries.count),
+            "itemListElement": .array(items),
+        ])
     }
 
     /// What the database says a note holds, for a note named by its scripting id.
@@ -693,22 +709,6 @@ final class NotesService: NSObject, Service, NSOpenSavePanelDelegate {
             }
         }
         return statistics.value
-    }
-
-    private func tagsResult(_ arguments: [String: Value]) async throws -> Value {
-        let includesDeleted = try argument("includeRecentlyDeleted", in: arguments, as: \.boolValue) ?? false
-        try checkDatabaseAccess()
-        let summaries = try await withStore { try await $0.tags(includingRecentlyDeleted: includesDeleted) }
-        let items: [Value] = summaries.map {
-            .object(["name": .string($0.tag.text), "numberOfItems": .int($0.noteCount)])
-        }
-        return .object([
-            "@context": "https://schema.org",
-            "@type": "ItemList",
-            "name": "Note Tags",
-            "numberOfItems": .int(summaries.count),
-            "itemListElement": .array(items),
-        ])
     }
 
     // MARK: - Arguments and Search

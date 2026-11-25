@@ -13,11 +13,13 @@ import Foundation
 ///
 /// The two routes name a note differently, so every tool takes either id and returns both
 /// (`NotesIDMapper`).
+///
+/// The tools change things, so they are offered only while "Allow writes" is on for Notes
+/// (see `ServiceWrites`), which starts off.
 extension NotesService {
     var tools: [Tool] {
         readTools
             + NotesWriteTools.tools(
-                isEnabled: { NotesWriteTools.isEnabledInSettings },
                 runner: AppleNotesScriptRunner(),
                 mapper: idMapper
             )
@@ -30,6 +32,5 @@ extension NotesService {
             + NotesPrivateTools.tools
     }
 
-    /// The tools that change notes are new, so they start off until the person turns writes on.
     var writesEnabledByDefault: Bool { false }
 }

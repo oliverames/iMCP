@@ -33,8 +33,7 @@ struct AppleNotesScriptRunner: NotesScriptRunning {
 /// The tools that create notes and folders.
 ///
 /// They only add to the Notes app: nothing they do changes or removes what is already there.
-/// iMCP offers them only while the person turns on "Allow writes" in Notes' settings
-/// (see `ServiceWrites`), which is off until then.
+/// The Notes service's "Allow writes" setting decides whether clients are offered them (see `NotesService.writesEnabledByDefault`).
 enum NotesWriteTools {
     /// The Notes-only setting that "Allow writes" replaced. `ServiceWrites.migrateLegacySettings` moves it.
     static let settingKey = ServiceWrites.legacyNotesKey
@@ -60,9 +59,8 @@ enum NotesWriteTools {
         guard isEnabled else { throw NotesWriteError.writesDisabled }
     }
 
-    /// The tools, each of which checks `isEnabled` when it runs.
+    /// The tools. They run only while the service's "Allow writes" setting is on, which `Service.call` checks.
     static func tools(
-        isEnabled: @escaping @Sendable () -> Bool,
         runner: any NotesScriptRunning,
         mapper: any NotesIDMapping
     ) -> [Tool] {
@@ -111,7 +109,6 @@ enum NotesWriteTools {
                     openWorldHint: false
                 )
             ) { arguments in
-                try requireEnabled(isEnabled())
                 let request = try NotesNoteRequest(
                     title: try requiredString("title", in: arguments),
                     body: try string("body", in: arguments) ?? "",
@@ -170,7 +167,6 @@ enum NotesWriteTools {
                     openWorldHint: false
                 )
             ) { arguments in
-                try requireEnabled(isEnabled())
                 let request = try NotesFolderRequest(
                     name: try requiredString("name", in: arguments),
                     parent: try string("parent", in: arguments),
