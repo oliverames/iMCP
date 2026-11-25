@@ -12,7 +12,11 @@
 
 **Upstream (approved by Oliver)**: #373 (`7affa97`) and #385 (`d734590`, without #377's commits) are rebased on `8967760`, pushed and answered; 324 and 359 tests ran, 1 skipped each. The alarm fix is mattt/iMCP#398 against `mattt/ios-app` (241 tests, 1 skipped).
 
-**Left off at**: Waiting on Mattt for #373, #385, #391, #392 and #398. mattt/iMCP#395 (date-only reminders as all-day) is open; take it when it merges.
+**Later the same day**: Upstream's #395 (date-only reminders as all-day), #396 and #397 are merged (`b3cdb53`), no conflicts. What still differs from upstream in the files it touched is fork work. 893 tests passed, the app builds, `Tests/release-checksum.sh` passes. Both CI jobs pass on #373 (`7affa97`) and #385 (`d734590`).
+
+**Left off at**: Waiting on Mattt for #373, #385, #391, #392 and #398. The installed app is `ef731b1`, so it doesn't have #395 to #397 yet. Remaining steps are in oliverames/iMCP#12, live checks in #13.
+
+**Open questions**: NEW: the fork's `limit` on `accessories_list` isn't in `AGENTS.md`'s kept list; keep or drop it (#12).
 
 ---
 
